@@ -538,7 +538,7 @@ export function registerSymbolTools(server: McpServer): void {
                 
                 // Get the content of the specified line
                 const lineText = await getLineText(uri, zeroBasedLine);
-                if (!lineText) {
+                if (lineText === undefined) {
                     throw new Error(`Line ${line} not found in file: ${path}`);
                 }
                 
@@ -724,7 +724,7 @@ export function registerSymbolTools(server: McpServer): void {
                     }
                     // Find symbol in line
                     const lineText = await getLineText(uri, line - 1);
-                    if (!lineText) {
+                    if (lineText === undefined) {
                         throw new Error(`Line ${line} not found in file: ${filePath}`);
                     }
                     charPosition = findSymbolInLine(lineText, symbol);

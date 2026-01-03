@@ -218,7 +218,7 @@ export function registerRefactorTools(server: McpServer): void {
                         throw new Error('Either character position or symbol name must be provided');
                     }
                     const lineText = await getLineText(uri, line - 1);
-                    if (!lineText) {
+                    if (lineText === undefined) {
                         throw new Error(`Line ${line} not found in file: ${filePath}`);
                     }
                     charPosition = findSymbolInLine(lineText, symbol);
