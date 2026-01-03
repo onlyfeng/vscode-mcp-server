@@ -382,11 +382,17 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
         try {
             const path = req.query.path as string;
             const line = parseInt(req.query.line as string);
-            const character = req.query.character ? parseInt(req.query.character as string) : undefined;
+            const characterParam = req.query.character as string | undefined;
+            const character = characterParam !== undefined ? parseInt(characterParam) : undefined;
             const symbol = req.query.symbol as string | undefined;
 
             if (!path || isNaN(line)) {
                 return res.status(400).json({ error: 'path and line parameters are required' });
+            }
+
+            // Validate character when provided
+            if (characterParam !== undefined && isNaN(character!)) {
+                return res.status(400).json({ error: 'character must be a valid integer' });
             }
 
             if (character === undefined && !symbol) {
@@ -448,11 +454,16 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
         try {
             const path = req.query.path as string;
             const line = parseInt(req.query.line as string);
-            const character = req.query.character ? parseInt(req.query.character as string) : undefined;
+            const characterParam = req.query.character as string | undefined;
+            const character = characterParam !== undefined ? parseInt(characterParam) : undefined;
             const symbol = req.query.symbol as string | undefined;
 
             if (!path || isNaN(line)) {
                 return res.status(400).json({ error: 'path and line parameters are required' });
+            }
+
+            if (characterParam !== undefined && isNaN(character!)) {
+                return res.status(400).json({ error: 'character must be a valid integer' });
             }
 
             if (character === undefined && !symbol) {
