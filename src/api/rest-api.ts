@@ -172,20 +172,25 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
             let lineCount = document.lineCount;
 
             if (startLine !== undefined || endLine !== undefined) {
-                // Handle startLine: undefined or -1 means beginning of file, otherwise convert 1-based to 0-based
-                const start = (startLine === undefined || startLine === -1) ? 0 : Math.max(0, startLine - 1);
-                // Handle endLine: undefined or -1 means end of file, otherwise convert 1-based to 0-based
-                const end = (endLine === undefined || endLine === -1) ? lineCount - 1 : Math.max(0, endLine - 1);
-                
-                // Validate range
-                const actualStart = Math.min(start, lineCount - 1);
-                const actualEnd = Math.min(end, lineCount - 1);
-                
-                const lines: string[] = [];
-                for (let i = actualStart; i <= actualEnd; i++) {
-                    lines.push(document.lineAt(i).text);
+                // Handle empty files - return empty content
+                if (lineCount === 0) {
+                    content = '';
+                } else {
+                    // Handle startLine: undefined or -1 means beginning of file, otherwise convert 1-based to 0-based
+                    const start = (startLine === undefined || startLine === -1) ? 0 : Math.max(0, startLine - 1);
+                    // Handle endLine: undefined or -1 means end of file, otherwise convert 1-based to 0-based
+                    const end = (endLine === undefined || endLine === -1) ? lineCount - 1 : Math.max(0, endLine - 1);
+                    
+                    // Validate range - ensure indices are within bounds
+                    const actualStart = Math.min(start, lineCount - 1);
+                    const actualEnd = Math.min(end, lineCount - 1);
+                    
+                    const lines: string[] = [];
+                    for (let i = actualStart; i <= actualEnd; i++) {
+                        lines.push(document.lineAt(i).text);
+                    }
+                    content = lines.join('\n');
                 }
-                content = lines.join('\n');
             } else {
                 content = document.getText();
             }
@@ -478,8 +483,12 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
             
             // Handle empty files
             if (document.lineCount === 0) {
-                // Empty file has no code actions
-                const requestId = `ca_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+                // Empty file has no code actions, but still cache for consistency
+                const emptyRange = new vscode.Range(
+                    new vscode.Position(0, 0),
+                    new vscode.Position(0, 0)
+                );
+                const requestId = cacheCodeActions([], fileUri, emptyRange);
                 return res.json({
                     requestId,
                     actions: [],
