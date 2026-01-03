@@ -1,17 +1,43 @@
 ---
 name: vscode-mcp
-description: VS Code MCP Server integration for AI coding agents. Provides REST API access to VS Code's language server features including diagnostics, symbol navigation, references, and code analysis. Use when you need to interact with VS Code's semantic code understanding capabilities via HTTP API calls from scripts.
+description: VS Code MCP Server semantic analysis skill for AI coding agents. Provides diagnostics, symbol navigation, references, and refactoring capabilities via REST API. Recommended for Claude Code - complements existing file/edit/shell tools with VS Code's language server features.
 ---
 
 # VS Code MCP Server Skill
 
-This skill enables AI agents to interact with VS Code's language server capabilities through a simple REST API.
+This skill enables AI agents to access VS Code's language server capabilities for semantic code analysis.
+
+**Recommended for Claude Code**: This skill provides diagnostics, symbol analysis, and refactoring tools that complement Claude Code's built-in file/edit/shell capabilities.
+
+## Recommended Configuration (Semantic-Only)
+
+Add to your VS Code `settings.json` to enable only semantic tools:
+
+```json
+{
+  "vscode-mcp-server.enabledTools": {
+    "file": false,
+    "edit": false,
+    "shell": false,
+    "diagnostics": true,
+    "symbol": true,
+    "refactor": true
+  }
+}
+```
+
+This configuration:
+- ❌ Disables file/edit/shell (use Claude Code's native tools)
+- ✅ Enables diagnostics (linter errors, warnings)
+- ✅ Enables symbol tools (document symbols, workspace search, references, definitions)
+- ✅ Enables refactor tools (rename, code actions)
 
 ## Prerequisites
 
 1. Install the **vscode-mcp-server** VS Code extension
-2. Enable the MCP server (click status bar or run command)
-3. Server runs at `http://127.0.0.1:3000` by default
+2. Apply the semantic-only configuration above
+3. Enable the MCP server (click status bar or run command)
+4. Server runs at `http://127.0.0.1:3000` by default
 
 ## Quick Start
 
@@ -26,11 +52,6 @@ curl http://127.0.0.1:3000/api/health
 - `GET /api/info` - List all available endpoints
 - `GET /api/health` - Health check
 
-### File Operations
-- `GET /api/files/list?path=&recursive=true` - List files
-- `GET /api/files/read?path=src/main.ts` - Read file content
-- `GET /api/files/read?path=src/main.ts&startLine=1&endLine=50` - Read partial file
-
 ### Diagnostics
 - `GET /api/diagnostics` - Get all diagnostics
 - `GET /api/diagnostics?path=src/main.ts` - Get file diagnostics
@@ -41,13 +62,17 @@ curl http://127.0.0.1:3000/api/health
 - `GET /api/symbols/references?path=src/main.ts&line=10&symbol=myFunc` - Find references
 - `GET /api/symbols/definition?path=src/main.ts&line=10&symbol=myFunc` - Go to definition
 
+### File Operations (if enabled)
+- `GET /api/files/list?path=&recursive=true` - List files
+- `GET /api/files/read?path=src/main.ts` - Read file content
+
 ## Configuration Presets
 
-For different use cases, apply configuration presets to VS Code settings:
+Available in `presets/` directory:
 
-- **Semantic-only mode** (for use with Claude Code): See `presets/semantic-only.json`
-- **Full-featured mode**: See `presets/full-featured.json`
-- **Read-only mode**: See `presets/readonly.json`
+- **semantic-only.json** ⭐ (Recommended for Claude Code)
+- **full-featured.json** (All tools enabled)
+- **readonly.json** (Read-only access)
 
 ## Usage with Scripts
 
