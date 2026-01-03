@@ -1,6 +1,8 @@
 /**
  * REST API endpoints for skill script direct access
  * These endpoints provide a simpler HTTP interface compared to MCP protocol
+ * 
+ * Uses shared services from ../services/ for core business logic
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
@@ -12,6 +14,22 @@ import {
     removeCachedActions
 } from '../utils/code-actions-cache';
 import type { ToolConfiguration } from '../server';
+
+// Import shared services
+import {
+    // Symbol services
+    getDocumentSymbols,
+    searchWorkspaceSymbols,
+    findReferences,
+    getDefinition,
+    // Refactor services
+    listCodeActions,
+    applySingleCodeAction,
+    applyAllQuickfixes,
+    renameSymbol,
+    // Diagnostics services
+    getDiagnostics
+} from '../services';
 
 /**
  * Creates a middleware that checks if a tool category is enabled
@@ -34,61 +52,6 @@ function requireToolEnabled(
         }
         next();
     };
-}
-
-/**
- * Apply a single code action
- */
-async function applyCodeAction(action: vscode.CodeAction, targetUri: vscode.Uri): Promise<boolean> {
-    try {
-        // Resolve action if needed
-        if (!action.edit && action.command) {
-            try {
-                const resolved = await vscode.commands.executeCommand<vscode.CodeAction>(
-                    'vscode.resolveCodeAction',
-                    action
-                );
-                if (resolved?.edit) {
-                    action.edit = resolved.edit;
-                }
-            } catch {
-                // Ignore resolve errors
-            }
-        }
-
-        // Apply workspace edit
-        if (action.edit) {
-            const success = await vscode.workspace.applyEdit(action.edit);
-            if (success) {
-                // Save affected documents (don't fail if save fails)
-                for (const [uri] of action.edit.entries()) {
-                    try {
-                        const doc = await vscode.workspace.openTextDocument(uri);
-                        if (doc.isDirty) {
-                            await doc.save();
-                        }
-                    } catch (saveError) {
-                        logger.warn(`[applyCodeAction] Failed to save ${uri.fsPath}: ${saveError}`);
-                    }
-                }
-                return true;
-            }
-        }
-
-        // Execute command
-        if (action.command) {
-            await vscode.commands.executeCommand(
-                action.command.command,
-                ...(action.command.arguments || [])
-            );
-            return true;
-        }
-
-        return false;
-    } catch (error) {
-        logger.error(`[applyCodeAction] Error: ${error}`);
-        return false;
-    }
 }
 
 /**
@@ -255,49 +218,18 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
         try {
             const path = req.query.path as string | undefined;
             
-            let diagnostics: { file: string; diagnostics: any[] }[] = [];
-
-            if (path) {
-                if (!vscode.workspace.workspaceFolders) {
-                    return res.status(400).json({ error: 'No workspace folder open' });
-                }
-                const workspaceRoot = vscode.workspace.workspaceFolders[0].uri;
-                const fileUri = vscode.Uri.joinPath(workspaceRoot, path);
-                const fileDiagnostics = vscode.languages.getDiagnostics(fileUri);
-                diagnostics.push({
-                    file: path,
-                    diagnostics: fileDiagnostics.map(d => ({
-                        message: d.message,
-                        severity: vscode.DiagnosticSeverity[d.severity],
-                        range: {
-                            start: { line: d.range.start.line + 1, character: d.range.start.character },
-                            end: { line: d.range.end.line + 1, character: d.range.end.character }
-                        },
-                        source: d.source
-                    }))
-                });
-            } else {
-                const allDiagnostics = vscode.languages.getDiagnostics();
-                for (const [uri, fileDiagnostics] of allDiagnostics) {
-                    if (fileDiagnostics.length > 0) {
-                        diagnostics.push({
-                            file: vscode.workspace.asRelativePath(uri),
-                            diagnostics: fileDiagnostics.map(d => ({
-                                message: d.message,
-                                severity: vscode.DiagnosticSeverity[d.severity],
-                                range: {
-                                    start: { line: d.range.start.line + 1, character: d.range.start.character },
-                                    end: { line: d.range.end.line + 1, character: d.range.end.character }
-                                },
-                                source: d.source
-                            }))
-                        });
-                    }
-                }
+            // Use shared service
+            const result = await getDiagnostics(path);
+            
+            if (!result.success) {
+                return res.status(400).json({ error: result.error });
             }
 
-            const totalCount = diagnostics.reduce((sum, d) => sum + d.diagnostics.length, 0);
-            res.json({ diagnostics, totalCount, fileCount: diagnostics.length });
+            res.json({
+                diagnostics: result.data!.diagnostics,
+                totalCount: result.data!.totalCount,
+                fileCount: result.data!.fileCount
+            });
         } catch (error) {
             logger.error(`[REST API] /diagnostics error: ${error}`);
             res.status(500).json({ error: String(error) });
@@ -321,20 +253,28 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
                 return res.status(400).json({ error: 'path parameter is required' });
             }
 
-            if (!vscode.workspace.workspaceFolders) {
-                return res.status(400).json({ error: 'No workspace folder open' });
+            // Use shared service
+            const result = await getDocumentSymbols(path);
+            
+            if (!result.success) {
+                return res.status(400).json({ error: result.error });
             }
 
-            const workspaceRoot = vscode.workspace.workspaceFolders[0].uri;
-            const fileUri = vscode.Uri.joinPath(workspaceRoot, path);
+            // Format symbols for API response (simplified format)
+            const formattedSymbols = result.data!.symbols.map(s => ({
+                name: s.name,
+                kind: s.kind,
+                range: s.range,
+                children: s.children || []
+            }));
 
-            const symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
-                'vscode.executeDocumentSymbolProvider',
-                fileUri
-            );
-
-            const formattedSymbols = formatSymbols(symbols || []);
-            res.json({ symbols: formattedSymbols, count: formattedSymbols.length, path });
+            res.json({ 
+                symbols: formattedSymbols, 
+                count: formattedSymbols.length, 
+                total: result.data!.total,
+                totalByKind: result.data!.totalByKind,
+                path 
+            });
         } catch (error) {
             logger.error(`[REST API] /symbols/document error: ${error}`);
             res.status(500).json({ error: String(error) });
@@ -344,7 +284,7 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
     /**
      * GET /api/symbols/workspace
      * Search symbols in the workspace
-     * Query params: query (required)
+     * Query params: query (required), maxResults (optional, default: 10)
      */
     router.get('/symbols/workspace', symbolMiddleware, async (req: Request, res: Response) => {
         try {
@@ -353,20 +293,26 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
                 return res.status(400).json({ error: 'query parameter is required' });
             }
 
-            const symbols = await vscode.commands.executeCommand<vscode.SymbolInformation[]>(
-                'vscode.executeWorkspaceSymbolProvider',
-                query
-            );
+            const maxResultsParam = req.query.maxResults as string | undefined;
+            const maxResults = maxResultsParam ? parseInt(maxResultsParam) : 10;
 
-            const formattedSymbols = (symbols || []).map(s => ({
-                name: s.name,
-                kind: vscode.SymbolKind[s.kind],
-                file: vscode.workspace.asRelativePath(s.location.uri),
-                line: s.location.range.start.line + 1,
-                character: s.location.range.start.character
-            }));
+            if (maxResultsParam && isNaN(maxResults)) {
+                return res.status(400).json({ error: 'maxResults must be a valid integer' });
+            }
 
-            res.json({ symbols: formattedSymbols, count: formattedSymbols.length, query });
+            // Use shared service
+            const result = await searchWorkspaceSymbols(query, maxResults);
+            
+            if (!result.success) {
+                return res.status(400).json({ error: result.error });
+            }
+
+            res.json({ 
+                symbols: result.data!.symbols, 
+                count: result.data!.symbols.length,
+                total: result.data!.total,
+                query 
+            });
         } catch (error) {
             logger.error(`[REST API] /symbols/workspace error: ${error}`);
             res.status(500).json({ error: String(error) });
@@ -390,7 +336,6 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
                 return res.status(400).json({ error: 'path and line parameters are required' });
             }
 
-            // Validate character when provided
             if (characterParam !== undefined && isNaN(character!)) {
                 return res.status(400).json({ error: 'character must be a valid integer' });
             }
@@ -399,46 +344,14 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
                 return res.status(400).json({ error: 'Either character or symbol parameter is required' });
             }
 
-            if (!vscode.workspace.workspaceFolders) {
-                return res.status(400).json({ error: 'No workspace folder open' });
+            // Use shared service
+            const result = await findReferences(path, line, character, symbol, true);
+            
+            if (!result.success) {
+                return res.status(400).json({ error: result.error });
             }
 
-            const workspaceRoot = vscode.workspace.workspaceFolders[0].uri;
-            const fileUri = vscode.Uri.joinPath(workspaceRoot, path);
-
-            // Open document and validate line number
-            const document = await vscode.workspace.openTextDocument(fileUri);
-            if (line < 1 || line > document.lineCount) {
-                return res.status(400).json({
-                    error: `Invalid line ${line}. Valid range: 1 to ${document.lineCount}`
-                });
-            }
-
-            let charPosition = character;
-            if (charPosition === undefined && symbol) {
-                const lineText = document.lineAt(line - 1).text;
-                charPosition = lineText.indexOf(symbol);
-                if (charPosition === -1) {
-                    return res.status(404).json({ error: `Symbol "${symbol}" not found on line ${line}` });
-                }
-            }
-
-            const position = new vscode.Position(line - 1, charPosition!);
-            const references = await vscode.commands.executeCommand<vscode.Location[]>(
-                'vscode.executeReferenceProvider',
-                fileUri,
-                position
-            ) || [];
-
-            const formattedRefs = references.map(ref => ({
-                file: vscode.workspace.asRelativePath(ref.uri),
-                line: ref.range.start.line + 1,
-                character: ref.range.start.character,
-                endLine: ref.range.end.line + 1,
-                endCharacter: ref.range.end.character
-            }));
-
-            res.json({ references: formattedRefs, count: formattedRefs.length });
+            res.json({ references: result.data, count: result.data!.length });
         } catch (error) {
             logger.error(`[REST API] /symbols/references error: ${error}`);
             res.status(500).json({ error: String(error) });
@@ -470,46 +383,14 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
                 return res.status(400).json({ error: 'Either character or symbol parameter is required' });
             }
 
-            if (!vscode.workspace.workspaceFolders) {
-                return res.status(400).json({ error: 'No workspace folder open' });
+            // Use shared service
+            const result = await getDefinition(path, line, character, symbol);
+            
+            if (!result.success) {
+                return res.status(400).json({ error: result.error });
             }
 
-            const workspaceRoot = vscode.workspace.workspaceFolders[0].uri;
-            const fileUri = vscode.Uri.joinPath(workspaceRoot, path);
-
-            // Open document and validate line number
-            const document = await vscode.workspace.openTextDocument(fileUri);
-            if (line < 1 || line > document.lineCount) {
-                return res.status(400).json({
-                    error: `Invalid line ${line}. Valid range: 1 to ${document.lineCount}`
-                });
-            }
-
-            let charPosition = character;
-            if (charPosition === undefined && symbol) {
-                const lineText = document.lineAt(line - 1).text;
-                charPosition = lineText.indexOf(symbol);
-                if (charPosition === -1) {
-                    return res.status(404).json({ error: `Symbol "${symbol}" not found on line ${line}` });
-                }
-            }
-
-            const position = new vscode.Position(line - 1, charPosition!);
-            const definitions = await vscode.commands.executeCommand<vscode.Location[]>(
-                'vscode.executeDefinitionProvider',
-                fileUri,
-                position
-            ) || [];
-
-            const formattedDefs = definitions.map(def => ({
-                file: vscode.workspace.asRelativePath(def.uri),
-                line: def.range.start.line + 1,
-                character: def.range.start.character,
-                endLine: def.range.end.line + 1,
-                endCharacter: def.range.end.character
-            }));
-
-            res.json({ definitions: formattedDefs, count: formattedDefs.length });
+            res.json({ definitions: result.data, count: result.data!.length });
         } catch (error) {
             logger.error(`[REST API] /symbols/definition error: ${error}`);
             res.status(500).json({ error: String(error) });
@@ -531,94 +412,40 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
             const path = req.query.path as string;
             const startLine = parseInt(req.query.startLine as string);
             const endLineParam = req.query.endLine as string | undefined;
-            const endLine = endLineParam ? parseInt(endLineParam) : startLine;
 
             if (!path || isNaN(startLine)) {
                 return res.status(400).json({ error: 'path and startLine parameters are required' });
             }
 
-            // Validate endLine is a valid number if provided
-            if (endLineParam && isNaN(endLine)) {
-                return res.status(400).json({ error: 'endLine must be a valid integer' });
+            let endLine: number | undefined = undefined;
+            if (endLineParam !== undefined) {
+                endLine = parseInt(endLineParam);
+                if (isNaN(endLine)) {
+                    return res.status(400).json({ error: 'endLine must be a valid integer' });
+                }
             }
 
-            if (!vscode.workspace.workspaceFolders) {
-                return res.status(400).json({ error: 'No workspace folder open' });
-            }
-
-            const workspaceRoot = vscode.workspace.workspaceFolders[0].uri;
-            const fileUri = vscode.Uri.joinPath(workspaceRoot, path);
-
-            const document = await vscode.workspace.openTextDocument(fileUri);
-            
-            // Handle empty files
-            if (document.lineCount === 0) {
-                // Empty file has no code actions, but still cache for consistency
-                const emptyRange = new vscode.Range(
-                    new vscode.Position(0, 0),
-                    new vscode.Position(0, 0)
-                );
-                const requestId = cacheCodeActions([], fileUri, emptyRange);
-                return res.json({
-                    requestId,
-                    actions: [],
-                    count: 0,
-                    expiresIn: '60 seconds'
-                });
-            }
-            
-            // Validate startLine is within bounds
-            if (startLine < 1 || startLine > document.lineCount) {
-                return res.status(400).json({ 
-                    error: `Invalid startLine ${startLine}. Valid range: 1 to ${document.lineCount}` 
-                });
-            }
-            
-            // Handle endLine: -1 means end of file
-            const actualEndLine = endLine === -1 ? document.lineCount : endLine;
-            
-            // Validate endLine is within bounds (if not -1)
-            if (endLine !== -1 && (actualEndLine < 1 || actualEndLine > document.lineCount)) {
-                return res.status(400).json({ 
-                    error: `Invalid endLine ${endLine}. Valid range: 1 to ${document.lineCount}, or -1 for end of file` 
-                });
-            }
-            
-            // Validate startLine <= actualEndLine
-            if (startLine > actualEndLine) {
-                return res.status(400).json({
-                    error: `Invalid range: startLine (${startLine}) cannot be greater than endLine (${actualEndLine})`
-                });
-            }
-            
-            const endChar = document.lineAt(actualEndLine - 1).text.length;
-
-            const range = new vscode.Range(
-                new vscode.Position(startLine - 1, 0),
-                new vscode.Position(actualEndLine - 1, endChar)
+            const result = await listCodeActions(
+                path,
+                startLine,
+                endLine ?? undefined,
+                0,
+                undefined,
+                undefined,
+                true // include source actions so fix-all entries are available
             );
 
-            const actions = await vscode.commands.executeCommand<vscode.CodeAction[]>(
-                'vscode.executeCodeActionProvider',
-                fileUri,
-                range
-            ) || [];
+            if (!result.success) {
+                return res.status(400).json({ error: result.error });
+            }
 
-            // Generate request ID and cache actions using shared cache
-            const requestId = cacheCodeActions(actions, fileUri, range);
-
-            const formattedActions = actions.map((action, index) => ({
-                index,
-                title: action.title,
-                kind: action.kind?.value || null,
-                isPreferred: action.isPreferred || false,
-                diagnostics: action.diagnostics?.map(d => d.message) || []
-            }));
+            const data = result.data!;
+            const requestId = cacheCodeActions(data.actions, data.uri, data.range);
 
             res.json({
                 requestId,
-                actions: formattedActions,
-                count: formattedActions.length,
+                actions: data.formattedActions,
+                count: data.formattedActions.length,
                 expiresIn: '60 seconds'
             });
         } catch (error) {
@@ -653,18 +480,10 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
             const results: string[] = [];
 
             if (applyAll) {
-                // Apply all quickfix actions (only quickfix kind, not other preferred actions)
-                const quickfixes = cached.actions.filter(a => 
-                    a.kind?.value?.startsWith('quickfix')
-                );
-
-                for (const action of quickfixes) {
-                    const success = await applyCodeAction(action, cached.uri);
-                    if (success) {
-                        appliedCount++;
-                        results.push(`Applied: ${action.title}`);
-                    }
-                }
+                // Use shared service for applyAll - re-fetches after each action
+                const applyResult = await applyAllQuickfixes(cached.uri, cached.range);
+                appliedCount = applyResult.appliedCount;
+                results.push(...applyResult.results);
             } else {
                 // Apply single action
                 if (cached.actions.length === 0) {
@@ -674,13 +493,15 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
                     return res.status(400).json({ error: `Invalid index ${index}. Valid range: 0 to ${cached.actions.length - 1}` });
                 }
 
+                // Use shared service for single action
                 const action = cached.actions[index];
-                const success = await applyCodeAction(action, cached.uri);
-                if (success) {
+                const actionResult = await applySingleCodeAction(action, cached.uri, cached.range);
+                const resultMessage = actionResult.message?.trim();
+                if (actionResult.applied) {
                     appliedCount++;
-                    results.push(`Applied: ${action.title}`);
+                    results.push(resultMessage ? `Applied: ${action.title}\n${resultMessage}` : `Applied: ${action.title}`);
                 } else {
-                    results.push(`Failed to apply: ${action.title}`);
+                    results.push(resultMessage ? `Failed to apply: ${action.title}\n${resultMessage}` : `Failed to apply: ${action.title}`);
                 }
             }
 
@@ -711,7 +532,6 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
                 return res.status(400).json({ error: 'path, line, and newName are required' });
             }
 
-            // Validate line is a valid number
             if (typeof line !== 'number' || isNaN(line) || !Number.isInteger(line)) {
                 return res.status(400).json({ error: 'line must be a valid integer' });
             }
@@ -720,91 +540,33 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
                 return res.status(400).json({ error: 'Either character or symbol is required' });
             }
 
-            // Validate character is a valid number if provided
             if (character !== undefined && (typeof character !== 'number' || isNaN(character) || !Number.isInteger(character))) {
                 return res.status(400).json({ error: 'character must be a valid integer' });
             }
 
-            if (!vscode.workspace.workspaceFolders) {
-                return res.status(400).json({ error: 'No workspace folder open' });
-            }
-
-            const workspaceRoot = vscode.workspace.workspaceFolders[0].uri;
-            const fileUri = vscode.Uri.joinPath(workspaceRoot, path);
-
-            // Open document and validate line number
-            const document = await vscode.workspace.openTextDocument(fileUri);
-            if (line < 1 || line > document.lineCount) {
-                return res.status(400).json({
-                    error: `Invalid line ${line}. Valid range: 1 to ${document.lineCount}`
-                });
-            }
-
-            let charPosition = character;
-            if (charPosition === undefined && symbol) {
-                const lineText = document.lineAt(line - 1).text;
-                charPosition = lineText.indexOf(symbol);
-                if (charPosition === -1) {
-                    return res.status(404).json({ error: `Symbol "${symbol}" not found on line ${line}` });
-                }
-            }
-
-            const position = new vscode.Position(line - 1, charPosition!);
-
-            // Execute rename provider
-            const workspaceEdit = await vscode.commands.executeCommand<vscode.WorkspaceEdit>(
-                'vscode.executeDocumentRenameProvider',
-                fileUri,
-                position,
-                newName
-            );
-
-            if (!workspaceEdit || workspaceEdit.size === 0) {
-                return res.status(400).json({ error: 'No rename edits generated. Symbol may not be renameable.' });
-            }
-
-            // Format affected files
-            const affectedFiles: { file: string; changes: number }[] = [];
-            for (const [uri, edits] of workspaceEdit.entries()) {
-                affectedFiles.push({
-                    file: vscode.workspace.asRelativePath(uri),
-                    changes: edits.length
-                });
+            // Use shared service
+            const result = await renameSymbol(path, line, character, symbol, newName, apply);
+            
+            if (!result.success) {
+                return res.status(400).json({ error: result.error });
             }
 
             if (apply) {
-                const success = await vscode.workspace.applyEdit(workspaceEdit);
-                if (!success) {
-                    return res.status(500).json({ error: 'Failed to apply rename' });
-                }
-
-                // Save affected documents to disk
-                for (const [uri] of workspaceEdit.entries()) {
-                    try {
-                        const doc = await vscode.workspace.openTextDocument(uri);
-                        if (doc.isDirty) {
-                            await doc.save();
-                        }
-                    } catch (saveError) {
-                        logger.warn(`[REST API] Failed to save ${uri.fsPath}: ${saveError}`);
-                    }
-                }
-
                 res.json({
                     success: true,
                     applied: true,
-                    newName,
-                    affectedFiles,
-                    totalChanges: affectedFiles.reduce((sum, f) => sum + f.changes, 0)
+                    newName: result.newName,
+                    affectedFiles: result.affectedFiles,
+                    totalChanges: result.totalChanges
                 });
             } else {
                 res.json({
                     success: true,
                     applied: false,
                     preview: true,
-                    newName,
-                    affectedFiles,
-                    totalChanges: affectedFiles.reduce((sum, f) => sum + f.changes, 0)
+                    newName: result.newName,
+                    affectedFiles: result.affectedFiles,
+                    totalChanges: result.totalChanges
                 });
             }
         } catch (error) {
@@ -830,7 +592,7 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
             { method: 'GET', path: '/api/files/read', description: 'Read file', params: ['path', 'startLine?', 'endLine?'], enabled: config.file },
             { method: 'GET', path: '/api/diagnostics', description: 'Get diagnostics', params: ['path?'], enabled: config.diagnostics },
             { method: 'GET', path: '/api/symbols/document', description: 'Document symbols', params: ['path'], enabled: config.symbol },
-            { method: 'GET', path: '/api/symbols/workspace', description: 'Search symbols', params: ['query'], enabled: config.symbol },
+            { method: 'GET', path: '/api/symbols/workspace', description: 'Search symbols', params: ['query', 'maxResults?'], enabled: config.symbol },
             { method: 'GET', path: '/api/symbols/references', description: 'Find references', params: ['path', 'line', 'character|symbol'], enabled: config.symbol },
             { method: 'GET', path: '/api/symbols/definition', description: 'Get definition', params: ['path', 'line', 'character|symbol'], enabled: config.symbol },
             { method: 'GET', path: '/api/refactor/code-actions', description: 'Get code actions', params: ['path', 'startLine', 'endLine?'], enabled: config.refactor },
@@ -889,14 +651,4 @@ async function listFilesRecursive(
     }
 }
 
-function formatSymbols(symbols: vscode.DocumentSymbol[]): any[] {
-    return symbols.map(s => ({
-        name: s.name,
-        kind: vscode.SymbolKind[s.kind],
-        range: {
-            start: { line: s.range.start.line + 1, character: s.range.start.character },
-            end: { line: s.range.end.line + 1, character: s.range.end.character }
-        },
-        children: s.children ? formatSymbols(s.children) : []
-    }));
-}
+// Note: Symbol formatting functions are now in services/symbol-service.ts

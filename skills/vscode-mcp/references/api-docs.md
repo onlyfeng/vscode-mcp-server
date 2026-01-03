@@ -12,7 +12,7 @@ Default port: `3000`
 
 The server respects `enabledTools` configuration. With the recommended `semantic-only.json` preset:
 - ✅ **Enabled**: Symbol operations, Refactor operations
-- ❌ **Disabled**: File operations, Diagnostics (use Cursor's built-in tools)
+- ❌ **Disabled**: File operations, Edit operations, Shell operations, Diagnostics (use Cursor's built-in tools)
 
 Disabled endpoints return `403 Forbidden`:
 ```json
@@ -106,22 +106,31 @@ curl "http://127.0.0.1:3000/api/symbols/document?path=src/main.ts"
     }
   ],
   "count": 1,
+  "total": 15,
+  "totalByKind": {
+    "Class": 1,
+    "Method": 8,
+    "Property": 6
+  },
   "path": "src/main.ts"
 }
 ```
+
+Note: `total` is the total number of symbols (including nested children), `totalByKind` provides a breakdown by symbol kind.
 
 ### GET /api/symbols/workspace
 
 Search for symbols across the workspace.
 
 **Query Parameters:**
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| query | string | Yes | Symbol name to search for |
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| query | string | Yes | - | Symbol name to search for |
+| maxResults | number | No | 10 | Maximum number of results to return |
 
 **Example:**
 ```bash
-curl "http://127.0.0.1:3000/api/symbols/workspace?query=MyClass"
+curl "http://127.0.0.1:3000/api/symbols/workspace?query=MyClass&maxResults=20"
 ```
 
 **Response:**
@@ -133,13 +142,17 @@ curl "http://127.0.0.1:3000/api/symbols/workspace?query=MyClass"
       "kind": "Class",
       "file": "src/main.ts",
       "line": 5,
-      "character": 0
+      "character": 0,
+      "containerName": "MyNamespace"
     }
   ],
   "count": 1,
+  "total": 5,
   "query": "MyClass"
 }
 ```
+
+Note: `total` is the total number of matching symbols found (may be greater than `count` if `maxResults` limits the response).
 
 ### GET /api/symbols/references
 
@@ -437,16 +450,17 @@ console.log(`Renamed in ${result.totalChanges} locations`);
 ```powershell
 $BASE_URL = "http://127.0.0.1:3000/api"
 
-# Check health
-Invoke-RestMethod -Uri "$BASE_URL/health"
+# Check health (use ConvertTo-Json for readable output)
+Invoke-RestMethod -Uri "$BASE_URL/health" | ConvertTo-Json
 
 # Find references
 $refs = Invoke-RestMethod -Uri "$BASE_URL/symbols/references?path=src/main.ts&line=10&symbol=MCPServer"
 Write-Host "Found $($refs.count) references"
+$refs.references | ConvertTo-Json
 
 # Rename symbol
 $body = @{ path = "src/main.ts"; line = 10; symbol = "oldName"; newName = "newName" } | ConvertTo-Json
-Invoke-RestMethod -Uri "$BASE_URL/refactor/rename" -Method Post -Body $body -ContentType "application/json"
+Invoke-RestMethod -Uri "$BASE_URL/refactor/rename" -Method Post -Body $body -ContentType "application/json" | ConvertTo-Json -Depth 3
 ```
 
 ---
