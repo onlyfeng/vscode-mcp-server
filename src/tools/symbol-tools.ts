@@ -3,7 +3,6 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from 'zod';
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import * as path from 'path';
-import * as fs from 'fs';
 import { logger } from '../utils/logger';
 
 /**
@@ -59,6 +58,52 @@ function uriToWorkspacePath(uri: vscode.Uri): string {
     // Convert to relative path
     const relativePath = path.relative(workspaceRoot, uri.fsPath);
     return relativePath;
+}
+
+/**
+ * Resolve a path (relative or absolute) to an absolute path
+ * @param inputPath The input path
+ * @returns Absolute path
+ */
+function resolveToAbsolutePath(inputPath: string): string {
+    if (!vscode.workspace.workspaceFolders) {
+        return inputPath;
+    }
+    
+    const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+    return path.resolve(workspaceRoot, inputPath);
+}
+
+/**
+ * Format a Location array to a readable string grouped by file
+ * @param locations Array of locations
+ * @returns Formatted string
+ */
+function formatLocations(locations: vscode.Location[]): string {
+    // Group by file
+    const groupedByFile = new Map<string, vscode.Location[]>();
+    
+    for (const loc of locations) {
+        const filePath = uriToWorkspacePath(loc.uri);
+        if (!groupedByFile.has(filePath)) {
+            groupedByFile.set(filePath, []);
+        }
+        groupedByFile.get(filePath)!.push(loc);
+    }
+    
+    let result = '';
+    for (const [filePath, locs] of groupedByFile.entries()) {
+        result += `\n${filePath}:\n`;
+        for (const loc of locs) {
+            const startLine = loc.range.start.line + 1;
+            const startChar = loc.range.start.character;
+            const endLine = loc.range.end.line + 1;
+            const endChar = loc.range.end.character;
+            result += `  - Line ${startLine}:${startChar} to ${endLine}:${endChar}\n`;
+        }
+    }
+    
+    return result;
 }
 
 /**
@@ -637,6 +682,100 @@ export function registerSymbolTools(server: McpServer): void {
                 return callResult;
             } catch (error) {
                 logger.error(`[get_document_symbols_code] Error in tool: ${error instanceof Error ? error.message : String(error)}`);
+                throw error;
+            }
+        }
+    );
+
+    // Add get_references_code tool - Find all references to a symbol
+    server.tool(
+        'get_references_code',
+        `Find all references to a symbol across the workspace.
+
+        WHEN TO USE: Understanding symbol usage, before refactoring, impact analysis.
+        
+        Returns references grouped by file with line numbers. Includes the declaration by default.`,
+        {
+            path: z.string().describe('The path to the file containing the symbol'),
+            line: z.number().describe('The line number of the symbol (1-based)'),
+            character: z.number().optional().describe('The character position in the line (0-based). If not provided, will search for the symbol name on the line.'),
+            symbol: z.string().optional().describe('The symbol name to search for on the line (used if character is not provided)'),
+            includeDeclaration: z.boolean().optional().default(true).describe('Whether to include the declaration in results (default: true)')
+        },
+        async ({ path: filePath, line, character, symbol, includeDeclaration = true }): Promise<CallToolResult> => {
+            logger.info(`[get_references_code] Tool called with path="${filePath}", line=${line}, character=${character}, symbol="${symbol}"`);
+            
+            try {
+                const fullPath = resolveToAbsolutePath(filePath);
+                const uri = vscode.Uri.file(fullPath);
+                
+                // Check if file exists
+                try {
+                    await vscode.workspace.fs.stat(uri);
+                } catch {
+                    throw new Error(`File not found: ${filePath}`);
+                }
+                
+                // Determine character position
+                let charPosition = character;
+                if (charPosition === undefined) {
+                    if (!symbol) {
+                        throw new Error('Either character position or symbol name must be provided');
+                    }
+                    // Find symbol in line
+                    const lineText = await getLineText(uri, line - 1);
+                    if (!lineText) {
+                        throw new Error(`Line ${line} not found in file: ${filePath}`);
+                    }
+                    charPosition = findSymbolInLine(lineText, symbol);
+                    if (charPosition === -1) {
+                        return {
+                            content: [{
+                                type: 'text',
+                                text: `Symbol "${symbol}" not found on line ${line} in file: ${filePath}`
+                            }]
+                        };
+                    }
+                }
+                
+                const position = new vscode.Position(line - 1, charPosition);
+                
+                // Execute reference provider
+                const references = await vscode.commands.executeCommand<vscode.Location[]>(
+                    'vscode.executeReferenceProvider',
+                    uri,
+                    position
+                ) || [];
+                
+                logger.info(`[get_references_code] Found ${references.length} references`);
+                
+                // Filter out declaration if requested
+                let filteredRefs = references;
+                if (!includeDeclaration && references.length > 0) {
+                    // The declaration is typically the first one at the same position
+                    filteredRefs = references.filter(ref => 
+                        !(ref.uri.toString() === uri.toString() && 
+                          ref.range.start.line === line - 1 && 
+                          ref.range.start.character === charPosition)
+                    );
+                }
+                
+                let resultText: string;
+                if (filteredRefs.length === 0) {
+                    resultText = `No references found for symbol at ${filePath}:${line}:${charPosition}`;
+                } else {
+                    resultText = `Found ${filteredRefs.length} reference(s) for symbol at ${filePath}:${line}:${charPosition}:`;
+                    resultText += formatLocations(filteredRefs);
+                }
+                
+                return {
+                    content: [{
+                        type: 'text',
+                        text: resultText
+                    }]
+                };
+            } catch (error) {
+                logger.error(`[get_references_code] Error: ${error instanceof Error ? error.message : String(error)}`);
                 throw error;
             }
         }

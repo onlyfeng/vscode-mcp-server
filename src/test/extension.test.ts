@@ -24,7 +24,8 @@ suite('Extension Test Suite', () => {
         mockMCPServer = {
             start: sinon.stub().resolves(),
             stop: sinon.stub().resolves(),
-            setFileListingCallback: sinon.spy()
+            setFileListingCallback: sinon.spy(),
+            setupTools: sinon.spy()
         };
         
         // Mock constructor for MCPServer
@@ -55,6 +56,8 @@ suite('Extension Test Suite', () => {
         
         // Create a mocked extension context
         context = createMockContext();
+        // Mock globalState.get to return true for server enabled state
+        context.globalState.get = sinon.stub().returns(true);
         
         // Mock command registration
         registerCommandStub = sinon.stub(vscode.commands, 'registerCommand').returns({
@@ -80,8 +83,9 @@ suite('Extension Test Suite', () => {
         assert.strictEqual(getConfigurationStub.called, true, 'Configuration not accessed');
         assert.strictEqual(workspaceConfig.get.calledWith('port'), true, 'Port not read from configuration');
         
-        // Check that MCPServer was created with configured port
-        assert.strictEqual(MockServerConstructor.calledWith(4321), true, 'MCPServer not created with configured port');
+        // Check that MCPServer was created with configured port (first argument)
+        assert.strictEqual(MockServerConstructor.called, true, 'MCPServer constructor not called');
+        assert.strictEqual(MockServerConstructor.firstCall.args[0], 4321, 'MCPServer not created with configured port');
     });
 
     test('Status bar item should be created with proper attributes', async () => {
@@ -91,8 +95,8 @@ suite('Extension Test Suite', () => {
         // Verify status bar was created
         assert.strictEqual(createStatusBarItemStub.called, true, 'Status bar item not created');
         
-        // Check the status bar attributes
-        assert.strictEqual(statusBarItem.command, 'vscode-mcp-server.showServerInfo', 'Status bar command not set correctly');
+        // Check the status bar attributes - command is now toggleServer
+        assert.strictEqual(statusBarItem.command, 'vscode-mcp-server.toggleServer', 'Status bar command not set correctly');
         assert.strictEqual(statusBarItem.show.called, true, 'Status bar not shown');
         
         // Check that the text contains the port number

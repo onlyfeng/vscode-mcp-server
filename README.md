@@ -94,6 +94,9 @@ The VS Code MCP Server extension implements an MCP-compliant server that allows 
 - **Make line replacements** in files
 - **Check for diagnostics** (errors and warnings) in your workspace
 - **Execute shell commands** in the integrated terminal with shell integration
+- **Find references** to symbols across the workspace
+- **Rename symbols** semantically across the entire project
+- **List and apply code actions** (quick fixes, refactorings)
 - **Toggle the server** on and off via a status bar item
 
 This extension enables AI assistants and other tools to interact with your VS Code workspace through the standardized MCP protocol.
@@ -194,6 +197,19 @@ The extension creates an MCP server that:
   - Analyzing code architecture and relationships
   - Finding all symbols of specific types within a file
 
+- **get_references_code**: Find all references to a symbol across the workspace
+  - Parameters:
+    - `path`: The path to the file containing the symbol
+    - `line`: The line number of the symbol (1-based)
+    - `character` (optional): The character position in the line (0-based)
+    - `symbol` (optional): The symbol name to search for on the line (used if character is not provided)
+    - `includeDeclaration` (optional): Whether to include the declaration in results (default: true)
+  
+  This tool is useful for:
+  - Understanding symbol usage across the codebase
+  - Impact analysis before refactoring
+  - Finding all usages of a function, class, or variable
+
 ### Shell Tools
 - **execute_shell_command_code**: Executes a shell command in the VS Code integrated terminal with shell integration
   - Parameters:
@@ -206,6 +222,46 @@ The extension creates an MCP server that:
   - Performing any shell operations that require terminal access
   - Getting command output for analysis and further processing
 
+### Refactor Tools
+- **rename_symbol_code**: Rename a symbol across the entire workspace using VS Code's rename provider
+  - Parameters:
+    - `path`: The path to the file containing the symbol
+    - `line`: The line number of the symbol (1-based)
+    - `character` (optional): The character position in the line (0-based)
+    - `symbol` (optional): The symbol name to search for on the line (used if character is not provided)
+    - `newName`: The new name for the symbol
+    - `apply` (optional): Whether to apply the rename (default: true). Set to false to preview changes.
+  
+  This tool provides:
+  - Semantic rename that updates all references
+  - Preview mode to see changes before applying
+  - Summary of affected files and changes
+
+- **list_code_actions_code**: List available code actions (quick fixes, refactorings) for a code range
+  - Parameters:
+    - `path`: The path to the file
+    - `startLine`: Start line of the range (1-based)
+    - `startCharacter` (optional): Start character of the range (0-based, default: 0)
+    - `endLine` (optional): End line of the range (1-based, default: same as startLine)
+    - `endCharacter` (optional): End character of the range (0-based, default: end of line)
+    - `onlyKinds` (optional): Filter by code action kinds (e.g., ["quickfix", "refactor"])
+    - `includeSourceActions` (optional): Include source actions like organize imports (default: false)
+  
+  This tool provides:
+  - Available quick fixes for diagnostics
+  - Refactoring options (extract method, inline variable, etc.)
+  - A requestId for use with apply_code_action_code (valid for 60 seconds)
+
+- **apply_code_action_code**: Apply a code action from a previous list_code_actions_code call
+  - Parameters:
+    - `requestId`: The request ID from list_code_actions_code
+    - `index`: The index of the action to apply (from the list)
+  
+  This tool is useful for:
+  - Applying quick fixes for linter errors
+  - Executing refactoring operations
+  - Automating code improvements
+
 ## Caveats/TODO
 
 Currently, only one workspace is supported. The extension also only works locally, to avoid exposing your VS Code instance to any network you may be connected to.
@@ -215,9 +271,23 @@ Currently, only one workspace is supported. The extension also only works locall
 * `vscode-mcp-server.port`: The port number for the MCP server (default: 3000)
 * `vscode-mcp-server.host`: Host address for the MCP server (default: 127.0.0.1)
 * `vscode-mcp-server.defaultEnabled`: Whether the MCP server should be enabled by default on VS Code startup
-* `vscode-mcp-server.enabledTools`: Configure which tool categories are enabled (file, edit, shell, diagnostics, symbol)
+* `vscode-mcp-server.enabledTools`: Configure which tool categories are enabled (file, edit, shell, diagnostics, symbol, refactor)
 
-**Selective Tool Configuration**: Useful for coding agents that already have certain capabilities. For example, with Claude Code you might disable file/edit tools and only enable symbol tools to add VS Code-specific symbol searching without tool duplication.
+**Selective Tool Configuration**: Useful for coding agents that already have certain capabilities. For example, with Claude Code you might disable file/edit tools and only enable symbol and refactor tools to add VS Code-specific symbol searching and refactoring capabilities without tool duplication.
+
+Example configuration for a semantic-only language server setup:
+```json
+{
+  "vscode-mcp-server.enabledTools": {
+    "file": false,
+    "edit": false,
+    "shell": false,
+    "diagnostics": true,
+    "symbol": true,
+    "refactor": true
+  }
+}
+```
 
 ## Using with MCP Clients
 

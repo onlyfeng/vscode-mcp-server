@@ -13,6 +13,10 @@ export class MockMCPServer {
         this.fileListingCallback = callback;
     }
 
+    public setupTools(): void {
+        // Mock implementation - registers tools based on configuration
+    }
+
     public async start(): Promise<void> {
         // Mock implementation
         return Promise.resolve();
