@@ -8,22 +8,46 @@ http://127.0.0.1:{port}/api
 
 Default port: `3000`
 
+## Configuration
+
+The server respects `enabledTools` configuration. With the recommended `semantic-only.json` preset:
+- ✅ **Enabled**: Symbol operations, Refactor operations
+- ❌ **Disabled**: File operations, Diagnostics (use Cursor's built-in tools)
+
+Disabled endpoints return `403 Forbidden`:
+```json
+{
+  "error": "File endpoints are disabled by configuration",
+  "hint": "Update vscode-mcp-server.enabledTools setting to enable this feature"
+}
+```
+
 ---
 
-## Server Endpoints
+## Server Endpoints (Always Available)
 
 ### GET /api/info
 
-Get server information and list of available endpoints.
+Get server information, enabled configuration, and endpoint status.
 
 **Response:**
 ```json
 {
   "name": "vscode-mcp-server",
-  "version": "0.3.1",
+  "version": "0.3.3",
   "description": "VS Code MCP Server REST API",
+  "enabledTools": {
+    "file": false,
+    "edit": false,
+    "shell": false,
+    "diagnostics": false,
+    "symbol": true,
+    "refactor": true
+  },
   "endpoints": [
-    { "method": "GET", "path": "/api/info", "description": "Server information" },
+    { "method": "GET", "path": "/api/health", "enabled": true },
+    { "method": "GET", "path": "/api/symbols/document", "enabled": true },
+    { "method": "GET", "path": "/api/files/list", "enabled": false },
     ...
   ]
 }
@@ -39,108 +63,6 @@ Health check endpoint.
   "status": "ok",
   "timestamp": "2026-01-03T12:00:00.000Z",
   "workspace": "my-project"
-}
-```
-
----
-
-## File Endpoints
-
-### GET /api/files/list
-
-List files in the workspace.
-
-**Query Parameters:**
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| path | string | No | "" | Relative path from workspace root |
-| recursive | boolean | No | false | List files recursively |
-
-**Example:**
-```bash
-curl "http://127.0.0.1:3000/api/files/list?path=src&recursive=true"
-```
-
-**Response:**
-```json
-{
-  "files": ["src/main.ts", "src/utils.ts"],
-  "count": 2
-}
-```
-
-### GET /api/files/read
-
-Read file contents.
-
-**Query Parameters:**
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| path | string | Yes | - | File path relative to workspace |
-| startLine | number | No | - | Start line (1-based) |
-| endLine | number | No | - | End line (1-based), use -1 for end of file |
-
-**Example:**
-```bash
-# Read entire file
-curl "http://127.0.0.1:3000/api/files/read?path=src/main.ts"
-
-# Read lines 10-20
-curl "http://127.0.0.1:3000/api/files/read?path=src/main.ts&startLine=10&endLine=20"
-```
-
-**Response:**
-```json
-{
-  "content": "file contents here...",
-  "lineCount": 150,
-  "path": "src/main.ts"
-}
-```
-
----
-
-## Diagnostics Endpoints
-
-### GET /api/diagnostics
-
-Get diagnostics (errors, warnings) for workspace or specific file.
-
-**Query Parameters:**
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| path | string | No | - | File path to get diagnostics for |
-
-**Example:**
-```bash
-# Get all diagnostics
-curl "http://127.0.0.1:3000/api/diagnostics"
-
-# Get diagnostics for specific file
-curl "http://127.0.0.1:3000/api/diagnostics?path=src/main.ts"
-```
-
-**Response:**
-```json
-{
-  "diagnostics": [
-    {
-      "file": "src/main.ts",
-      "diagnostics": [
-        {
-          "message": "Cannot find name 'foo'",
-          "severity": "Error",
-          "range": {
-            "start": { "line": 10, "character": 5 },
-            "end": { "line": 10, "character": 8 }
-          },
-          "source": "ts"
-        }
-      ]
-    }
-  ],
-  "totalCount": 1,
-  "fileCount": 1
 }
 ```
 
@@ -302,6 +224,133 @@ curl "http://127.0.0.1:3000/api/symbols/definition?path=src/main.ts&line=20&symb
 
 ---
 
+## Refactor Endpoints
+
+### GET /api/refactor/code-actions
+
+Get available code actions (quick fixes, refactorings) for a code range.
+
+**Query Parameters:**
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| path | string | Yes | - | File path |
+| startLine | number | Yes | - | Start line (1-based) |
+| endLine | number | No | startLine | End line (1-based), use -1 for end of file |
+
+**Example:**
+```bash
+# Get code actions for entire file
+curl "http://127.0.0.1:3000/api/refactor/code-actions?path=src/main.ts&startLine=1&endLine=-1"
+
+# Get code actions for specific line
+curl "http://127.0.0.1:3000/api/refactor/code-actions?path=src/main.ts&startLine=10"
+```
+
+**Response:**
+```json
+{
+  "requestId": "ca_1704303600000_abc123",
+  "actions": [
+    {
+      "index": 0,
+      "title": "Remove unused import",
+      "kind": "quickfix",
+      "isPreferred": true,
+      "diagnostics": ["'fs' is declared but never used."]
+    },
+    {
+      "index": 1,
+      "title": "Organize imports",
+      "kind": "source.organizeImports",
+      "isPreferred": false,
+      "diagnostics": []
+    }
+  ],
+  "count": 2,
+  "expiresIn": "60 seconds"
+}
+```
+
+### POST /api/refactor/apply-action
+
+Apply a code action from a previous `/refactor/code-actions` request.
+
+**Request Body:**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| requestId | string | Yes | Request ID from code-actions response |
+| index | number | No* | Index of the action to apply |
+| applyAll | boolean | No | Apply all quickfix actions (default: false) |
+
+*Required when `applyAll` is false.
+
+**Example:**
+```bash
+# Apply specific action
+curl -X POST "http://127.0.0.1:3000/api/refactor/apply-action" \
+  -H "Content-Type: application/json" \
+  -d '{"requestId": "ca_1704303600000_abc123", "index": 0}'
+
+# Apply all quickfixes
+curl -X POST "http://127.0.0.1:3000/api/refactor/apply-action" \
+  -H "Content-Type: application/json" \
+  -d '{"requestId": "ca_1704303600000_abc123", "applyAll": true}'
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "appliedCount": 1,
+  "results": ["Applied: Remove unused import"]
+}
+```
+
+### POST /api/refactor/rename
+
+Rename a symbol across the workspace.
+
+**Request Body:**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| path | string | Yes | File path containing the symbol |
+| line | number | Yes | Line number (1-based) |
+| character | number | No* | Character position (0-based) |
+| symbol | string | No* | Symbol name on the line |
+| newName | string | Yes | New name for the symbol |
+| apply | boolean | No | Apply the rename (default: true) |
+
+*Either `character` or `symbol` must be provided.
+
+**Example:**
+```bash
+# Rename with symbol name
+curl -X POST "http://127.0.0.1:3000/api/refactor/rename" \
+  -H "Content-Type: application/json" \
+  -d '{"path": "src/main.ts", "line": 10, "symbol": "oldName", "newName": "newName"}'
+
+# Preview rename without applying
+curl -X POST "http://127.0.0.1:3000/api/refactor/rename" \
+  -H "Content-Type: application/json" \
+  -d '{"path": "src/main.ts", "line": 10, "symbol": "oldName", "newName": "newName", "apply": false}'
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "applied": true,
+  "newName": "newName",
+  "affectedFiles": [
+    { "file": "src/main.ts", "changes": 5 },
+    { "file": "src/utils.ts", "changes": 3 }
+  ],
+  "totalChanges": 8
+}
+```
+
+---
+
 ## Error Handling
 
 All endpoints return appropriate HTTP status codes:
@@ -310,7 +359,9 @@ All endpoints return appropriate HTTP status codes:
 |--------|-------------|
 | 200 | Success |
 | 400 | Bad Request (missing required parameters) |
+| 403 | Forbidden (endpoint disabled by configuration) |
 | 404 | Not Found (symbol/file not found) |
+| 410 | Gone (code action request expired) |
 | 500 | Internal Server Error |
 
 Error response format:
@@ -331,21 +382,31 @@ import requests
 
 BASE_URL = "http://127.0.0.1:3000/api"
 
-# Get diagnostics
-response = requests.get(f"{BASE_URL}/diagnostics")
-data = response.json()
+# Find all references to a symbol
+response = requests.get(
+    f"{BASE_URL}/symbols/references",
+    params={"path": "src/main.ts", "line": 10, "symbol": "myFunction"}
+)
+refs = response.json()
+print(f"Found {refs['count']} references")
 
-for file_diag in data["diagnostics"]:
-    print(f"\n{file_diag['file']}:")
-    for diag in file_diag["diagnostics"]:
-        print(f"  Line {diag['range']['start']['line']}: {diag['message']}")
+# Apply code actions
+actions = requests.get(
+    f"{BASE_URL}/refactor/code-actions",
+    params={"path": "src/main.ts", "startLine": 1, "endLine": -1}
+).json()
+
+if actions["count"] > 0:
+    result = requests.post(
+        f"{BASE_URL}/refactor/apply-action",
+        json={"requestId": actions["requestId"], "applyAll": True}
+    ).json()
+    print(f"Applied {result['appliedCount']} fixes")
 ```
 
 ### JavaScript/Node.js
 
 ```javascript
-const fetch = require('node-fetch');
-
 const BASE_URL = 'http://127.0.0.1:3000/api';
 
 async function getReferences(path, line, symbol) {
@@ -354,20 +415,68 @@ async function getReferences(path, line, symbol) {
   return response.json();
 }
 
+async function renameSymbol(path, line, symbol, newName) {
+  const response = await fetch(`${BASE_URL}/refactor/rename`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, line, symbol, newName })
+  });
+  return response.json();
+}
+
 // Usage
 const refs = await getReferences('src/main.ts', 10, 'myFunction');
 console.log(`Found ${refs.count} references`);
+
+const result = await renameSymbol('src/main.ts', 10, 'myFunction', 'newFunction');
+console.log(`Renamed in ${result.totalChanges} locations`);
 ```
 
-### Bash/curl
+### PowerShell
 
-```bash
-#!/bin/bash
-BASE_URL="http://127.0.0.1:3000/api"
+```powershell
+$BASE_URL = "http://127.0.0.1:3000/api"
 
 # Check health
-curl -s "$BASE_URL/health" | jq .
+Invoke-RestMethod -Uri "$BASE_URL/health"
 
-# Get all diagnostics and format output
-curl -s "$BASE_URL/diagnostics" | jq '.diagnostics[] | "\(.file): \(.diagnostics | length) issues"'
+# Find references
+$refs = Invoke-RestMethod -Uri "$BASE_URL/symbols/references?path=src/main.ts&line=10&symbol=MCPServer"
+Write-Host "Found $($refs.count) references"
+
+# Rename symbol
+$body = @{ path = "src/main.ts"; line = 10; symbol = "oldName"; newName = "newName" } | ConvertTo-Json
+Invoke-RestMethod -Uri "$BASE_URL/refactor/rename" -Method Post -Body $body -ContentType "application/json"
+```
+
+---
+
+## Appendix: Optional Endpoints (Disabled by Default)
+
+The following endpoints are available when `enabledTools` configuration enables them.
+With `semantic-only.json` preset, these are disabled.
+
+### File Endpoints (requires `file: true`)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/files/list?path=&recursive=true` | List files |
+| GET | `/api/files/read?path=src/main.ts` | Read file content |
+
+### Diagnostics Endpoints (requires `diagnostics: true`)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/diagnostics` | Get all workspace diagnostics |
+| GET | `/api/diagnostics?path=src/main.ts` | Get file-specific diagnostics |
+
+To enable these endpoints, use `full-featured.json` preset or update settings:
+```json
+{
+  "vscode-mcp-server.enabledTools": {
+    "file": true,
+    "diagnostics": true,
+    ...
+  }
+}
 ```

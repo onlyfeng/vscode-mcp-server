@@ -133,7 +133,8 @@ export class MCPServer {
 
     private setupRoutes(): void {
         // Mount REST API router for skill script direct access
-        const restApiRouter = createRestApiRouter();
+        // Pass tool configuration to control which endpoints are available
+        const restApiRouter = createRestApiRouter(this.toolConfig);
         this.app.use('/api', restApiRouter);
         logger.info('REST API endpoints mounted at /api');
 
@@ -178,7 +179,7 @@ export class MCPServer {
         });
 
         // Handle unsupported methods
-        this.app.get('/mcp', async (_req, res) => {
+        this.app.get('/mcp', async (req, res) => {
             logger.info('Received GET MCP request');
             res.writeHead(405).end(JSON.stringify({
                 jsonrpc: "2.0",
@@ -190,7 +191,7 @@ export class MCPServer {
             }));
         });
 
-        this.app.delete('/mcp', async (_req, res) => {
+        this.app.delete('/mcp', async (req, res) => {
             logger.info('Received DELETE MCP request');
             res.writeHead(405).end(JSON.stringify({
                 jsonrpc: "2.0",
@@ -203,7 +204,7 @@ export class MCPServer {
         });
 
         // Handle OPTIONS requests for CORS
-        this.app.options('/mcp', (_req, res) => {
+        this.app.options('/mcp', (req, res) => {
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
             res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');

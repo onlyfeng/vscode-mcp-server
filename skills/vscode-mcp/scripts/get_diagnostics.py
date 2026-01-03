@@ -2,6 +2,9 @@
 """
 Get diagnostics from VS Code MCP Server.
 
+NOTE: This script requires diagnostics to be enabled in vscode-mcp-server configuration.
+With semantic-only.json preset, this endpoint is disabled (403).
+
 Usage:
     python get_diagnostics.py [path] [--port PORT]
     
@@ -31,6 +34,8 @@ def get_diagnostics(path: str = None, port: int = 3000) -> dict:
     
     try:
         response = requests.get(url, timeout=10)
+        if response.status_code == 403:
+            return {"error": "Diagnostics endpoint is disabled by configuration", "diagnostics": []}
         response.raise_for_status()
         return response.json()
     except requests.exceptions.ConnectionError:
@@ -43,6 +48,10 @@ def get_diagnostics(path: str = None, port: int = 3000) -> dict:
 
 def format_diagnostics(data: dict) -> None:
     """Format and print diagnostics."""
+    if "error" in data and data["error"]:
+        print(f"⚠️  {data['error']}")
+        return
+        
     print(f"\n📋 Diagnostics Summary")
     print(f"   Total issues: {data.get('totalCount', 0)}")
     print(f"   Files with issues: {data.get('fileCount', 0)}")

@@ -3,33 +3,134 @@
  * These endpoints provide a simpler HTTP interface compared to MCP protocol
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import * as vscode from 'vscode';
 import { logger } from '../utils/logger';
+import type { ToolConfiguration } from '../server';
+
+/**
+ * Creates a middleware that checks if a tool category is enabled
+ * @param config Tool configuration
+ * @param category The category to check
+ * @param categoryName Human-readable name for error messages
+ */
+function requireToolEnabled(
+    config: ToolConfiguration,
+    category: keyof ToolConfiguration,
+    categoryName: string
+) {
+    return (_req: Request, res: Response, next: NextFunction) => {
+        if (!config[category]) {
+            logger.info(`[REST API] ${categoryName} endpoint blocked by configuration`);
+            return res.status(403).json({
+                error: `${categoryName} endpoints are disabled by configuration`,
+                hint: 'Update vscode-mcp-server.enabledTools setting to enable this feature'
+            });
+        }
+        next();
+    };
+}
+
+// ============================================
+// Code Actions Cache (for apply-action workflow)
+// ============================================
+interface CachedCodeActions {
+    actions: vscode.CodeAction[];
+    timestamp: number;
+    uri: vscode.Uri;
+    range: vscode.Range;
+}
+
+const codeActionsCache = new Map<string, CachedCodeActions>();
+
+/**
+ * Apply a single code action
+ */
+async function applyCodeAction(action: vscode.CodeAction, targetUri: vscode.Uri): Promise<boolean> {
+    try {
+        // Resolve action if needed
+        if (!action.edit && action.command) {
+            try {
+                const resolved = await vscode.commands.executeCommand<vscode.CodeAction>(
+                    'vscode.resolveCodeAction',
+                    action
+                );
+                if (resolved?.edit) {
+                    action.edit = resolved.edit;
+                }
+            } catch {
+                // Ignore resolve errors
+            }
+        }
+
+        // Apply workspace edit
+        if (action.edit) {
+            const success = await vscode.workspace.applyEdit(action.edit);
+            if (success) {
+                // Save affected documents
+                for (const [uri] of action.edit.entries()) {
+                    const doc = await vscode.workspace.openTextDocument(uri);
+                    if (doc.isDirty) {
+                        await doc.save();
+                    }
+                }
+                return true;
+            }
+        }
+
+        // Execute command
+        if (action.command) {
+            await vscode.commands.executeCommand(
+                action.command.command,
+                ...(action.command.arguments || [])
+            );
+            return true;
+        }
+
+        return false;
+    } catch (error) {
+        logger.error(`[applyCodeAction] Error: ${error}`);
+        return false;
+    }
+}
 
 /**
  * Creates and configures the REST API router
+ * @param toolConfig Tool configuration to control which endpoints are enabled
  * @returns Express Router with all REST API endpoints
  */
-export function createRestApiRouter(): Router {
+export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
     const router = Router();
+    
+    // Default configuration (all enabled)
+    const config: ToolConfiguration = toolConfig || {
+        file: true,
+        edit: true,
+        shell: true,
+        diagnostics: true,
+        symbol: true,
+        refactor: true
+    };
+    
+    logger.info(`[REST API] Initializing with config: ${JSON.stringify(config)}`);
 
     // Middleware to log all API requests
-    router.use((req, res, next) => {
+    router.use((req, _res, next) => {
         logger.info(`[REST API] ${req.method} ${req.path}`);
         next();
     });
 
     // ============================================
-    // File Operations
+    // File Operations (requires file: true)
     // ============================================
+    const fileMiddleware = requireToolEnabled(config, 'file', 'File');
 
     /**
      * GET /api/files/list
      * List files in the workspace
      * Query params: path (optional), recursive (optional, default: false)
      */
-    router.get('/files/list', async (req: Request, res: Response) => {
+    router.get('/files/list', fileMiddleware, async (req: Request, res: Response) => {
         try {
             const path = (req.query.path as string) || '';
             const recursive = req.query.recursive === 'true';
@@ -56,7 +157,7 @@ export function createRestApiRouter(): Router {
      * Read file contents
      * Query params: path (required), startLine (optional), endLine (optional)
      */
-    router.get('/files/read', async (req: Request, res: Response) => {
+    router.get('/files/read', fileMiddleware, async (req: Request, res: Response) => {
         try {
             const path = req.query.path as string;
             if (!path) {
@@ -97,15 +198,16 @@ export function createRestApiRouter(): Router {
     });
 
     // ============================================
-    // Diagnostics Operations
+    // Diagnostics Operations (requires diagnostics: true)
     // ============================================
+    const diagnosticsMiddleware = requireToolEnabled(config, 'diagnostics', 'Diagnostics');
 
     /**
      * GET /api/diagnostics
      * Get diagnostics for the workspace or specific file
      * Query params: path (optional)
      */
-    router.get('/diagnostics', async (req: Request, res: Response) => {
+    router.get('/diagnostics', diagnosticsMiddleware, async (req: Request, res: Response) => {
         try {
             const path = req.query.path as string | undefined;
             
@@ -159,15 +261,16 @@ export function createRestApiRouter(): Router {
     });
 
     // ============================================
-    // Symbol Operations
+    // Symbol Operations (requires symbol: true)
     // ============================================
+    const symbolMiddleware = requireToolEnabled(config, 'symbol', 'Symbol');
 
     /**
      * GET /api/symbols/document
      * Get document symbols for a file
      * Query params: path (required)
      */
-    router.get('/symbols/document', async (req: Request, res: Response) => {
+    router.get('/symbols/document', symbolMiddleware, async (req: Request, res: Response) => {
         try {
             const path = req.query.path as string;
             if (!path) {
@@ -199,7 +302,7 @@ export function createRestApiRouter(): Router {
      * Search symbols in the workspace
      * Query params: query (required)
      */
-    router.get('/symbols/workspace', async (req: Request, res: Response) => {
+    router.get('/symbols/workspace', symbolMiddleware, async (req: Request, res: Response) => {
         try {
             const query = req.query.query as string;
             if (!query) {
@@ -231,7 +334,7 @@ export function createRestApiRouter(): Router {
      * Find all references to a symbol
      * Query params: path, line, character (or symbol)
      */
-    router.get('/symbols/references', async (req: Request, res: Response) => {
+    router.get('/symbols/references', symbolMiddleware, async (req: Request, res: Response) => {
         try {
             const path = req.query.path as string;
             const line = parseInt(req.query.line as string);
@@ -290,7 +393,7 @@ export function createRestApiRouter(): Router {
      * Get symbol definition
      * Query params: path, line, character (or symbol)
      */
-    router.get('/symbols/definition', async (req: Request, res: Response) => {
+    router.get('/symbols/definition', symbolMiddleware, async (req: Request, res: Response) => {
         try {
             const path = req.query.path as string;
             const line = parseInt(req.query.line as string);
@@ -345,6 +448,239 @@ export function createRestApiRouter(): Router {
     });
 
     // ============================================
+    // Refactor Operations (requires refactor: true)
+    // ============================================
+    const refactorMiddleware = requireToolEnabled(config, 'refactor', 'Refactor');
+
+    /**
+     * GET /api/refactor/code-actions
+     * Get available code actions for a range
+     * Query params: path, startLine, endLine (optional, default: startLine)
+     */
+    router.get('/refactor/code-actions', refactorMiddleware, async (req: Request, res: Response) => {
+        try {
+            const path = req.query.path as string;
+            const startLine = parseInt(req.query.startLine as string);
+            const endLine = req.query.endLine ? parseInt(req.query.endLine as string) : startLine;
+
+            if (!path || isNaN(startLine)) {
+                return res.status(400).json({ error: 'path and startLine parameters are required' });
+            }
+
+            if (!vscode.workspace.workspaceFolders) {
+                return res.status(400).json({ error: 'No workspace folder open' });
+            }
+
+            const workspaceRoot = vscode.workspace.workspaceFolders[0].uri;
+            const fileUri = vscode.Uri.joinPath(workspaceRoot, path);
+
+            const document = await vscode.workspace.openTextDocument(fileUri);
+            
+            // Handle endLine: -1 means end of file
+            const actualEndLine = endLine === -1 ? document.lineCount : endLine;
+            const endChar = document.lineAt(Math.min(actualEndLine - 1, document.lineCount - 1)).text.length;
+
+            const range = new vscode.Range(
+                new vscode.Position(startLine - 1, 0),
+                new vscode.Position(actualEndLine - 1, endChar)
+            );
+
+            const actions = await vscode.commands.executeCommand<vscode.CodeAction[]>(
+                'vscode.executeCodeActionProvider',
+                fileUri,
+                range
+            ) || [];
+
+            // Generate request ID and cache actions
+            const requestId = `ca_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+            codeActionsCache.set(requestId, {
+                actions,
+                timestamp: Date.now(),
+                uri: fileUri,
+                range
+            });
+
+            const formattedActions = actions.map((action, index) => ({
+                index,
+                title: action.title,
+                kind: action.kind?.value || null,
+                isPreferred: action.isPreferred || false,
+                diagnostics: action.diagnostics?.map(d => d.message) || []
+            }));
+
+            res.json({
+                requestId,
+                actions: formattedActions,
+                count: formattedActions.length,
+                expiresIn: '60 seconds'
+            });
+        } catch (error) {
+            logger.error(`[REST API] /refactor/code-actions error: ${error}`);
+            res.status(500).json({ error: String(error) });
+        }
+    });
+
+    /**
+     * POST /api/refactor/apply-action
+     * Apply a code action from cache
+     * Body: { requestId, index, applyAll? }
+     */
+    router.post('/refactor/apply-action', refactorMiddleware, async (req: Request, res: Response) => {
+        try {
+            const { requestId, index, applyAll = false } = req.body;
+
+            if (!requestId) {
+                return res.status(400).json({ error: 'requestId is required' });
+            }
+
+            if (!applyAll && (index === undefined || index === null)) {
+                return res.status(400).json({ error: 'index is required when applyAll is false' });
+            }
+
+            const cached = codeActionsCache.get(requestId);
+            if (!cached) {
+                return res.status(404).json({ error: 'Request ID not found or expired. Please call /refactor/code-actions again.' });
+            }
+
+            // Check expiration (60 seconds)
+            if (Date.now() - cached.timestamp > 60000) {
+                codeActionsCache.delete(requestId);
+                return res.status(410).json({ error: 'Request ID expired. Please call /refactor/code-actions again.' });
+            }
+
+            let appliedCount = 0;
+            const results: string[] = [];
+
+            if (applyAll) {
+                // Apply all quickfix actions
+                const quickfixes = cached.actions.filter(a => 
+                    a.kind?.value?.startsWith('quickfix') || a.isPreferred
+                );
+
+                for (const action of quickfixes) {
+                    const success = await applyCodeAction(action, cached.uri);
+                    if (success) {
+                        appliedCount++;
+                        results.push(`Applied: ${action.title}`);
+                    }
+                }
+            } else {
+                // Apply single action
+                if (index < 0 || index >= cached.actions.length) {
+                    return res.status(400).json({ error: `Invalid index ${index}. Valid range: 0-${cached.actions.length - 1}` });
+                }
+
+                const action = cached.actions[index];
+                const success = await applyCodeAction(action, cached.uri);
+                if (success) {
+                    appliedCount++;
+                    results.push(`Applied: ${action.title}`);
+                } else {
+                    results.push(`Failed to apply: ${action.title}`);
+                }
+            }
+
+            // Invalidate cache
+            codeActionsCache.delete(requestId);
+
+            res.json({
+                success: appliedCount > 0,
+                appliedCount,
+                results
+            });
+        } catch (error) {
+            logger.error(`[REST API] /refactor/apply-action error: ${error}`);
+            res.status(500).json({ error: String(error) });
+        }
+    });
+
+    /**
+     * POST /api/refactor/rename
+     * Rename a symbol
+     * Body: { path, line, character?, symbol?, newName, apply? }
+     */
+    router.post('/refactor/rename', refactorMiddleware, async (req: Request, res: Response) => {
+        try {
+            const { path, line, character, symbol, newName, apply = true } = req.body;
+
+            if (!path || !line || !newName) {
+                return res.status(400).json({ error: 'path, line, and newName are required' });
+            }
+
+            if (character === undefined && !symbol) {
+                return res.status(400).json({ error: 'Either character or symbol is required' });
+            }
+
+            if (!vscode.workspace.workspaceFolders) {
+                return res.status(400).json({ error: 'No workspace folder open' });
+            }
+
+            const workspaceRoot = vscode.workspace.workspaceFolders[0].uri;
+            const fileUri = vscode.Uri.joinPath(workspaceRoot, path);
+
+            let charPosition = character;
+            if (charPosition === undefined && symbol) {
+                const document = await vscode.workspace.openTextDocument(fileUri);
+                const lineText = document.lineAt(line - 1).text;
+                charPosition = lineText.indexOf(symbol);
+                if (charPosition === -1) {
+                    return res.status(404).json({ error: `Symbol "${symbol}" not found on line ${line}` });
+                }
+            }
+
+            const position = new vscode.Position(line - 1, charPosition);
+
+            // Execute rename provider
+            const workspaceEdit = await vscode.commands.executeCommand<vscode.WorkspaceEdit>(
+                'vscode.executeDocumentRenameProvider',
+                fileUri,
+                position,
+                newName
+            );
+
+            if (!workspaceEdit || workspaceEdit.size === 0) {
+                return res.status(400).json({ error: 'No rename edits generated. Symbol may not be renameable.' });
+            }
+
+            // Format affected files
+            const affectedFiles: { file: string; changes: number }[] = [];
+            for (const [uri, edits] of workspaceEdit.entries()) {
+                affectedFiles.push({
+                    file: vscode.workspace.asRelativePath(uri),
+                    changes: edits.length
+                });
+            }
+
+            if (apply) {
+                const success = await vscode.workspace.applyEdit(workspaceEdit);
+                if (!success) {
+                    return res.status(500).json({ error: 'Failed to apply rename' });
+                }
+
+                res.json({
+                    success: true,
+                    applied: true,
+                    newName,
+                    affectedFiles,
+                    totalChanges: affectedFiles.reduce((sum, f) => sum + f.changes, 0)
+                });
+            } else {
+                res.json({
+                    success: true,
+                    applied: false,
+                    preview: true,
+                    newName,
+                    affectedFiles,
+                    totalChanges: affectedFiles.reduce((sum, f) => sum + f.changes, 0)
+                });
+            }
+        } catch (error) {
+            logger.error(`[REST API] /refactor/rename error: ${error}`);
+            res.status(500).json({ error: String(error) });
+        }
+    });
+
+    // ============================================
     // Server Info & Configuration
     // ============================================
 
@@ -353,20 +689,28 @@ export function createRestApiRouter(): Router {
      * Get server information and available endpoints
      */
     router.get('/info', (_req: Request, res: Response) => {
+        // Build endpoints list based on configuration
+        const endpoints: { method: string; path: string; description: string; params?: string[]; body?: string[]; enabled: boolean }[] = [
+            { method: 'GET', path: '/api/health', description: 'Health check', enabled: true },
+            { method: 'GET', path: '/api/info', description: 'Server information', enabled: true },
+            { method: 'GET', path: '/api/files/list', description: 'List files', params: ['path?', 'recursive?'], enabled: config.file },
+            { method: 'GET', path: '/api/files/read', description: 'Read file', params: ['path', 'startLine?', 'endLine?'], enabled: config.file },
+            { method: 'GET', path: '/api/diagnostics', description: 'Get diagnostics', params: ['path?'], enabled: config.diagnostics },
+            { method: 'GET', path: '/api/symbols/document', description: 'Document symbols', params: ['path'], enabled: config.symbol },
+            { method: 'GET', path: '/api/symbols/workspace', description: 'Search symbols', params: ['query'], enabled: config.symbol },
+            { method: 'GET', path: '/api/symbols/references', description: 'Find references', params: ['path', 'line', 'character|symbol'], enabled: config.symbol },
+            { method: 'GET', path: '/api/symbols/definition', description: 'Get definition', params: ['path', 'line', 'character|symbol'], enabled: config.symbol },
+            { method: 'GET', path: '/api/refactor/code-actions', description: 'Get code actions', params: ['path', 'startLine', 'endLine?'], enabled: config.refactor },
+            { method: 'POST', path: '/api/refactor/apply-action', description: 'Apply code action', body: ['requestId', 'index', 'applyAll?'], enabled: config.refactor },
+            { method: 'POST', path: '/api/refactor/rename', description: 'Rename symbol', body: ['path', 'line', 'character|symbol', 'newName', 'apply?'], enabled: config.refactor }
+        ];
+
         res.json({
             name: 'vscode-mcp-server',
-            version: '0.3.1',
+            version: '0.3.3',
             description: 'VS Code MCP Server REST API',
-            endpoints: [
-                { method: 'GET', path: '/api/info', description: 'Server information' },
-                { method: 'GET', path: '/api/files/list', description: 'List files', params: ['path?', 'recursive?'] },
-                { method: 'GET', path: '/api/files/read', description: 'Read file', params: ['path', 'startLine?', 'endLine?'] },
-                { method: 'GET', path: '/api/diagnostics', description: 'Get diagnostics', params: ['path?'] },
-                { method: 'GET', path: '/api/symbols/document', description: 'Document symbols', params: ['path'] },
-                { method: 'GET', path: '/api/symbols/workspace', description: 'Search symbols', params: ['query'] },
-                { method: 'GET', path: '/api/symbols/references', description: 'Find references', params: ['path', 'line', 'character|symbol'] },
-                { method: 'GET', path: '/api/symbols/definition', description: 'Get definition', params: ['path', 'line', 'character|symbol'] }
-            ]
+            enabledTools: config,
+            endpoints
         });
     });
 
