@@ -351,7 +351,30 @@ export function registerRefactorTools(server: McpServer): void {
                 // Open document to get line length if needed
                 const document = await vscode.workspace.openTextDocument(uri);
                 
+                // Validate startLine is within document bounds
+                if (startLine < 1 || startLine > document.lineCount) {
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: `Invalid startLine ${startLine}. File has ${document.lineCount} lines (valid range: 1 to ${document.lineCount}).`
+                        }],
+                        isError: true
+                    };
+                }
+                
                 const actualEndLine = endLine ?? startLine;
+                
+                // Validate actualEndLine is within document bounds
+                if (actualEndLine < 1 || actualEndLine > document.lineCount) {
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: `Invalid endLine ${actualEndLine}. File has ${document.lineCount} lines (valid range: 1 to ${document.lineCount}).`
+                        }],
+                        isError: true
+                    };
+                }
+                
                 const actualEndChar = endCharacter ?? document.lineAt(actualEndLine - 1).text.length;
                 
                 const range = new vscode.Range(
