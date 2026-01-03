@@ -6,6 +6,11 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import * as vscode from 'vscode';
 import { logger } from '../utils/logger';
+import {
+    cacheCodeActions,
+    getCachedActions,
+    removeCachedActions
+} from '../utils/code-actions-cache';
 import type { ToolConfiguration } from '../server';
 
 /**
@@ -30,18 +35,6 @@ function requireToolEnabled(
         next();
     };
 }
-
-// ============================================
-// Code Actions Cache (for apply-action workflow)
-// ============================================
-interface CachedCodeActions {
-    actions: vscode.CodeAction[];
-    timestamp: number;
-    uri: vscode.Uri;
-    range: vscode.Range;
-}
-
-const codeActionsCache = new Map<string, CachedCodeActions>();
 
 /**
  * Apply a single code action
@@ -518,14 +511,8 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
                 range
             ) || [];
 
-            // Generate request ID and cache actions
-            const requestId = `ca_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-            codeActionsCache.set(requestId, {
-                actions,
-                timestamp: Date.now(),
-                uri: fileUri,
-                range
-            });
+            // Generate request ID and cache actions using shared cache
+            const requestId = cacheCodeActions(actions, fileUri, range);
 
             const formattedActions = actions.map((action, index) => ({
                 index,
@@ -564,15 +551,9 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
                 return res.status(400).json({ error: 'index is required when applyAll is false' });
             }
 
-            const cached = codeActionsCache.get(requestId);
+            const cached = getCachedActions(requestId);
             if (!cached) {
                 return res.status(404).json({ error: 'Request ID not found or expired. Please call /refactor/code-actions again.' });
-            }
-
-            // Check expiration (60 seconds)
-            if (Date.now() - cached.timestamp > 60000) {
-                codeActionsCache.delete(requestId);
-                return res.status(410).json({ error: 'Request ID expired. Please call /refactor/code-actions again.' });
             }
 
             let appliedCount = 0;
@@ -608,7 +589,7 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
             }
 
             // Invalidate cache
-            codeActionsCache.delete(requestId);
+            removeCachedActions(requestId);
 
             res.json({
                 success: appliedCount > 0,

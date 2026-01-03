@@ -4,54 +4,14 @@ import { z } from 'zod';
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import * as path from 'path';
 import { logger } from '../utils/logger';
-
-/**
- * Cache for code actions with TTL support
- * Key: requestId, Value: { actions, timestamp, uri, range }
- */
-interface CachedCodeActions {
-    actions: vscode.CodeAction[];
-    timestamp: number;
-    uri: vscode.Uri;
-    range: vscode.Range;
-}
-
-const codeActionsCache = new Map<string, CachedCodeActions>();
-const CODE_ACTIONS_TTL = 60000; // 60 seconds TTL
-
-/**
- * Generate a unique request ID for code actions
- */
-function generateRequestId(): string {
-    return `ca_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-}
-
-/**
- * Clean up expired cache entries
- */
-function cleanupExpiredCache(): void {
-    const now = Date.now();
-    for (const [key, value] of codeActionsCache.entries()) {
-        if (now - value.timestamp > CODE_ACTIONS_TTL) {
-            codeActionsCache.delete(key);
-            logger.info(`[cleanupExpiredCache] Removed expired cache entry: ${key}`);
-        }
-    }
-}
-
-/**
- * Invalidate all cache entries related to a specific file URI
- * This should be called after applying edits to ensure fresh code actions
- */
-function invalidateCacheForUri(uri: vscode.Uri): void {
-    const uriString = uri.toString();
-    for (const [key, value] of codeActionsCache.entries()) {
-        if (value.uri.toString() === uriString) {
-            codeActionsCache.delete(key);
-            logger.info(`[invalidateCacheForUri] Invalidated cache entry ${key} for uri: ${uriString}`);
-        }
-    }
-}
+import {
+    codeActionsCache,
+    CODE_ACTIONS_TTL,
+    generateRequestId,
+    cleanupExpiredCache,
+    invalidateCacheForUri,
+    removeCachedActions
+} from '../utils/code-actions-cache';
 
 /**
  * Save a document by URI (following edit-tools.ts pattern)
@@ -521,7 +481,7 @@ export function registerRefactorTools(server: McpServer): void {
         Use applyAll=true to apply all quickfix actions in sequence (useful for fixing multiple similar issues).`,
         {
             requestId: z.string().describe('The request ID from list_code_actions_code'),
-            index: z.number().describe('The index of the action to apply (from the list). Ignored if applyAll=true.'),
+            index: z.number().optional().describe('The index of the action to apply (from the list). Required when applyAll=false, ignored when applyAll=true.'),
             applyAll: z.boolean().optional().default(false).describe('Apply all quickfix actions in sequence (default: false). When true, ignores index parameter.')
         },
         async ({ requestId, index, applyAll = false }): Promise<CallToolResult> => {
@@ -546,7 +506,7 @@ export function registerRefactorTools(server: McpServer): void {
                 
                 // Check if expired
                 if (Date.now() - cached.timestamp > CODE_ACTIONS_TTL) {
-                    codeActionsCache.delete(requestId);
+                    removeCachedActions(requestId);
                     return {
                         content: [{
                             type: 'text',
@@ -781,7 +741,18 @@ export function registerRefactorTools(server: McpServer): void {
                     }
                 } else {
                     // Single action mode
-                    // Validate index for single action mode
+                    // Validate index is provided for single action mode
+                    if (index === undefined || index === null) {
+                        return {
+                            content: [{
+                                type: 'text',
+                                text: `index is required when applyAll is false`
+                            }],
+                            isError: true
+                        };
+                    }
+                    
+                    // Validate index range
                     if (index < 0 || index >= cached.actions.length) {
                         return {
                             content: [{
@@ -791,7 +762,7 @@ export function registerRefactorTools(server: McpServer): void {
                             isError: true
                         };
                     }
-                    
+
                     const actionToApply = cached.actions[index];
                     const { applied, message } = await applySingleAction(actionToApply, cached.uri);
                     
@@ -807,7 +778,7 @@ export function registerRefactorTools(server: McpServer): void {
                 }
                 
                 // Also remove the current request from cache
-                codeActionsCache.delete(requestId);
+                removeCachedActions(requestId);
                 
                 // Force save the main document if not already saved
                 await saveDocument(cached.uri);
