@@ -476,8 +476,23 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
 
             const document = await vscode.workspace.openTextDocument(fileUri);
             
+            // Validate startLine is within bounds
+            if (startLine < 1 || startLine > document.lineCount) {
+                return res.status(400).json({ 
+                    error: `Invalid startLine ${startLine}. Valid range: 1 to ${document.lineCount}` 
+                });
+            }
+            
             // Handle endLine: -1 means end of file
             const actualEndLine = endLine === -1 ? document.lineCount : endLine;
+            
+            // Validate endLine is within bounds (if not -1)
+            if (endLine !== -1 && (actualEndLine < 1 || actualEndLine > document.lineCount)) {
+                return res.status(400).json({ 
+                    error: `Invalid endLine ${endLine}. Valid range: 1 to ${document.lineCount}, or -1 for end of file` 
+                });
+            }
+            
             const endChar = document.lineAt(Math.min(actualEndLine - 1, document.lineCount - 1)).text.length;
 
             const range = new vscode.Range(
