@@ -3,7 +3,6 @@ import * as vscode from 'vscode';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { Server } from 'http';
-import { Request, Response } from 'express';
 import { registerFileTools, FileListingCallback } from './tools/file-tools';
 import { registerEditTools } from './tools/edit-tools';
 import { registerShellTools } from './tools/shell-tools';
@@ -173,7 +172,7 @@ export class MCPServer {
         });
 
         // Handle unsupported methods
-        this.app.get('/mcp', async (req, res) => {
+        this.app.get('/mcp', async (_req, res) => {
             logger.info('Received GET MCP request');
             res.writeHead(405).end(JSON.stringify({
                 jsonrpc: "2.0",
@@ -185,7 +184,7 @@ export class MCPServer {
             }));
         });
 
-        this.app.delete('/mcp', async (req, res) => {
+        this.app.delete('/mcp', async (_req, res) => {
             logger.info('Received DELETE MCP request');
             res.writeHead(405).end(JSON.stringify({
                 jsonrpc: "2.0",
@@ -198,7 +197,7 @@ export class MCPServer {
         });
 
         // Handle OPTIONS requests for CORS
-        this.app.options('/mcp', (req, res) => {
+        this.app.options('/mcp', (_req, res) => {
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
             res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
