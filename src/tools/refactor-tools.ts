@@ -141,25 +141,35 @@ function findSymbolInLine(lineText: string, symbolName: string): number {
  */
 function isDangerousQuickfix(action: vscode.CodeAction): boolean {
     const title = action.title.toLowerCase();
+    const safeRemovalKeywords = [
+        'import',
+        'parameter',
+        'argument',
+        'variable',
+        'property',
+        'function',
+        'method',
+        'class',
+        'interface',
+        'type'
+    ];
+    const hasSafeRemovalKeyword = safeRemovalKeywords.some(keyword => title.includes(keyword));
     
-    // Filter out "Remove unused declaration" type actions
-    // These can incorrectly remove function calls with side effects (like logging)
-    // TypeScript may mark string literals in function calls as "unused declarations"
-    if (title.includes('remove unused declaration') || 
+    // We only treat "remove unused" style actions as dangerous when they don't clearly
+    // target a specific, intentionally unused symbol (parameter, variable, etc.).
+    // This prevents filtering legitimate fixes such as "Remove unused parameter 'req'".
+    if ((title.includes('remove unused declaration') ||
         title.includes('remove unused') ||
-        title.includes('delete unused')) {
+        title.includes('delete unused')) &&
+        !hasSafeRemovalKeyword) {
         logger.info(`[isDangerousQuickfix] Filtering dangerous action: "${action.title}"`);
         return true;
     }
     
-    // Filter out actions that delete entire statements without being specific about variables/imports
-    // But allow "Remove import" which is safe
-    if (title.includes('remove') && !title.includes('import')) {
-        // Check if it's a generic removal action (not targeting a specific import)
-        if (!title.includes('parameter') && !title.includes('variable')) {
-            logger.info(`[isDangerousQuickfix] Filtering potentially dangerous removal action: "${action.title}"`);
-            return true;
-        }
+    // Filter out overly generic removal actions (e.g. "Remove statement") but allow scoped ones
+    if (title.includes('remove') && !title.includes('import') && !hasSafeRemovalKeyword) {
+        logger.info(`[isDangerousQuickfix] Filtering potentially dangerous removal action: "${action.title}"`);
+        return true;
     }
     
     return false;
@@ -533,30 +543,93 @@ export function registerRefactorTools(server: McpServer): void {
                 
                 let totalApplied = 0;
                 let resultMessage = '';
+
+                // Ensure the target document is the active editor when needed.
+                // Some VS Code/TypeScript code actions (especially fix-all via command)
+                // rely on editor context and won't apply changes unless the document
+                // is visible/active.
+                const ensureActiveEditor = async (targetUri: vscode.Uri): Promise<void> => {
+                    try {
+                        const doc = await vscode.workspace.openTextDocument(targetUri);
+                        await vscode.window.showTextDocument(doc, {
+                            preview: false,
+                            preserveFocus: true,
+                        });
+                    } catch (error) {
+                        logger.warn(`[apply_code_action_code] Could not show document in editor: ${error instanceof Error ? error.message : String(error)}`);
+                    }
+                };
                 
                 // Helper function to apply a single code action
                 const applySingleAction = async (action: vscode.CodeAction, targetUri: vscode.Uri): Promise<{ applied: boolean; message: string }> => {
                     logger.info(`[apply_code_action_code] Applying action: ${action.title}`);
-                    logger.info(`[apply_code_action_code] Action has edit: ${!!action.edit}, has command: ${!!action.command}`);
+                    logger.info(`[apply_code_action_code] Action has edit: ${!!action.edit}, has command: ${!!action.command}, kind: ${action.kind?.value}`);
                     
                     let actionApplied = false;
                     let actionMessage = `Applying code action: "${action.title}"\n`;
                     
-                    // For actions with only command, try to resolve to get the edit
-                    if (!action.edit && action.command) {
-                        logger.info(`[apply_code_action_code] Resolving code action to get edit...`);
+                    // Try to resolve the action to get edit/command if they are missing
+                    // Some actions (like "Prefix all unused declarations") need resolution first
+                    if (!action.edit || !action.command) {
+                        logger.info(`[apply_code_action_code] Resolving code action to get edit/command...`);
                         try {
                             const resolvedAction = await vscode.commands.executeCommand<vscode.CodeAction>(
                                 'vscode.resolveCodeAction',
                                 action
                             );
-                            if (resolvedAction && resolvedAction.edit) {
-                                logger.info(`[apply_code_action_code] Resolved action has edit`);
-                                action.edit = resolvedAction.edit;
+                            if (resolvedAction) {
+                                if (resolvedAction.edit && !action.edit) {
+                                    logger.info(`[apply_code_action_code] Resolved action has edit`);
+                                    action.edit = resolvedAction.edit;
+                                }
+                                if (resolvedAction.command && !action.command) {
+                                    logger.info(`[apply_code_action_code] Resolved action has command: ${resolvedAction.command.command}`);
+                                    action.command = resolvedAction.command;
+                                }
                             }
                         } catch (resolveError) {
                             logger.warn(`[apply_code_action_code] Could not resolve code action: ${resolveError instanceof Error ? resolveError.message : String(resolveError)}`);
                         }
+                    }
+                    
+                    // Log the state after resolution
+                    logger.info(`[apply_code_action_code] After resolve - has edit: ${!!action.edit}, has command: ${!!action.command}`);
+                    
+                    // If still no edit and no command, try executing the action directly via VS Code's apply code action
+                    if (!action.edit && !action.command) {
+                        logger.warn(`[apply_code_action_code] Action has no edit and no command after resolution, trying direct application...`);
+                        try {
+                            // Try to apply the code action directly using VS Code's internal mechanism
+                            // This works for some complex actions that need special handling
+                            const docBefore = await vscode.workspace.openTextDocument(targetUri);
+                            const contentBefore = docBefore.getText();
+                            
+                            // Some actions can be applied by executing them as code action
+                            await ensureActiveEditor(targetUri);
+                            await vscode.commands.executeCommand('editor.action.codeAction', {
+                                kind: action.kind?.value,
+                                preferred: action.isPreferred,
+                                apply: 'ifSingle'
+                            });
+                            
+                            // Wait for changes to be applied
+                            await new Promise(resolve => setTimeout(resolve, 150));
+                            
+                            const docAfter = await vscode.workspace.openTextDocument(targetUri);
+                            const contentAfter = docAfter.getText();
+                            
+                            if (contentAfter !== contentBefore) {
+                                actionMessage += `Applied via direct code action execution.\n`;
+                                actionApplied = true;
+                                await saveDocument(targetUri);
+                            } else {
+                                actionMessage += `No changes detected after direct application attempt.\n`;
+                            }
+                        } catch (directError) {
+                            logger.error(`[apply_code_action_code] Direct application failed: ${directError instanceof Error ? directError.message : String(directError)}`);
+                            actionMessage += `Action has no edit and no command, and direct application failed.\n`;
+                        }
+                        return { applied: actionApplied, message: actionMessage };
                     }
                     
                     // Apply workspace edit if present
@@ -591,6 +664,7 @@ export function registerRefactorTools(server: McpServer): void {
                                 action.command.command.includes('typescript') && action.command.command.includes('fix');
                             
                             // Get document version before command execution for change detection
+                            await ensureActiveEditor(targetUri);
                             const docBeforeCmd = await vscode.workspace.openTextDocument(targetUri);
                             const versionBefore = docBeforeCmd.version;
                             const contentBefore = docBeforeCmd.getText();
@@ -658,7 +732,9 @@ export function registerRefactorTools(server: McpServer): void {
                     // This is necessary because applying one action changes the file content,
                     // which invalidates the position information of subsequent cached actions
                     const MAX_ITERATIONS = 50; // Safety limit to prevent infinite loops
+                    const MAX_NO_CHANGE_ITERATIONS = 3; // Stop if no changes after consecutive attempts
                     let iteration = 0;
+                    let noChangeIterations = 0;
                     const targetUri = cached.uri;
                     const originalRange = cached.range;
                     
@@ -690,15 +766,30 @@ export function registerRefactorTools(server: McpServer): void {
                     logger.info(`[apply_code_action_code] applyAll mode: found ${safeQuickfixes.length} safe quickfix actions (${dangerousCount} dangerous filtered out)`);
                     resultMessage = `Applying quickfix actions (found ${safeQuickfixes.length} safe, ${dangerousCount} filtered as potentially dangerous):\n\n`;
                     
-                    // Track processed action titles to avoid retrying them
-                    // This includes both failed actions AND actions that executed but may not have changed the file
-                    const processedActionTitles = new Set<string>();
+                    // Track document content to detect changes
+                    // NOTE: We don't use action titles for deduplication because multiple actions
+                    // can have identical titles (e.g., "Prefix 'req' with an underscore" for different positions)
+                    let lastDocumentContent = '';
                     
                     while (iteration < MAX_ITERATIONS) {
                         iteration++;
                         
                         // Re-fetch code actions with fresh position information
                         const document = await vscode.workspace.openTextDocument(targetUri);
+                        const currentContent = document.getText();
+                        
+                        // Check if document content changed from last iteration
+                        if (currentContent === lastDocumentContent) {
+                            noChangeIterations++;
+                            logger.info(`[apply_code_action_code] Document unchanged (${noChangeIterations}/${MAX_NO_CHANGE_ITERATIONS})`);
+                            if (noChangeIterations >= MAX_NO_CHANGE_ITERATIONS) {
+                                logger.info(`[apply_code_action_code] No changes after ${MAX_NO_CHANGE_ITERATIONS} consecutive attempts, stopping`);
+                                break;
+                            }
+                        } else {
+                            noChangeIterations = 0;
+                            lastDocumentContent = currentContent;
+                        }
                         
                         // Recalculate range based on current document
                         const endLine = Math.min(originalRange.end.line, document.lineCount - 1);
@@ -715,12 +806,11 @@ export function registerRefactorTools(server: McpServer): void {
                             'quickfix'
                         ) || [];
                         
-                        // Filter to quickfix actions only, excluding dangerous ones and previously processed ones
-                        // Only filter by quickfix kind, not isPreferred (which could include non-quickfix actions)
+                        // Filter to quickfix actions only, excluding dangerous ones
+                        // NOTE: We filter by kind only, NOT by title, to allow multiple actions with same title
                         const quickfixActions = freshActions.filter(a =>
                             a.kind?.value?.startsWith('quickfix') &&
-                            !isDangerousQuickfix(a) &&
-                            !processedActionTitles.has(a.title)
+                            !isDangerousQuickfix(a)
                         );
                         
                         if (quickfixActions.length === 0) {
@@ -734,15 +824,11 @@ export function registerRefactorTools(server: McpServer): void {
                         
                         resultMessage += message + '\n';
                         
-                        // Always track processed actions to avoid retrying them
-                        // This prevents infinite loops when an action executes but doesn't change the file
-                        processedActionTitles.add(actionToApply.title);
-                        
                         if (applied) {
                             totalApplied++;
                             logger.info(`[apply_code_action_code] Action "${actionToApply.title}" applied successfully`);
                         } else {
-                            logger.warn(`[apply_code_action_code] Action "${actionToApply.title}" failed to apply (${processedActionTitles.size} processed so far)`);
+                            logger.warn(`[apply_code_action_code] Action "${actionToApply.title}" failed to apply`);
                         }
                         
                         // Small delay to allow VS Code to process changes
