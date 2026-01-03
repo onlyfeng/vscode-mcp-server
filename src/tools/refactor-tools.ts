@@ -174,6 +174,38 @@ function findSymbolInLine(lineText: string, symbolName: string): number {
 }
 
 /**
+ * Check if a code action is potentially dangerous (might remove useful code)
+ * These actions should be skipped in applyAll mode to avoid unintended code removal
+ * @param action The code action to check
+ * @returns true if the action should be filtered out in applyAll mode
+ */
+function isDangerousQuickfix(action: vscode.CodeAction): boolean {
+    const title = action.title.toLowerCase();
+    
+    // Filter out "Remove unused declaration" type actions
+    // These can incorrectly remove function calls with side effects (like logging)
+    // TypeScript may mark string literals in function calls as "unused declarations"
+    if (title.includes('remove unused declaration') || 
+        title.includes('remove unused') ||
+        title.includes('delete unused')) {
+        logger.info(`[isDangerousQuickfix] Filtering dangerous action: "${action.title}"`);
+        return true;
+    }
+    
+    // Filter out actions that delete entire statements without being specific about variables/imports
+    // But allow "Remove import" which is safe
+    if (title.includes('remove') && !title.includes('import')) {
+        // Check if it's a generic removal action (not targeting a specific import)
+        if (!title.includes('parameter') && !title.includes('variable')) {
+            logger.info(`[isDangerousQuickfix] Filtering potentially dangerous removal action: "${action.title}"`);
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+/**
  * Registers MCP refactor-related tools with the server
  * @param server MCP server instance
  */
@@ -524,48 +556,15 @@ export function registerRefactorTools(server: McpServer): void {
                     };
                 }
                 
-                // Determine which actions to apply
-                let actionsToApply: vscode.CodeAction[];
-                if (applyAll) {
-                    // Filter to only quickfix actions for safety
-                    actionsToApply = cached.actions.filter(a => 
-                        a.kind?.value?.startsWith('quickfix') || a.isPreferred
-                    );
-                    if (actionsToApply.length === 0) {
-                        return {
-                            content: [{
-                                type: 'text',
-                                text: `No quickfix actions found to apply. Available actions may be refactoring suggestions only.`
-                            }],
-                            isError: true
-                        };
-                    }
-                    logger.info(`[apply_code_action_code] applyAll mode: found ${actionsToApply.length} quickfix actions`);
-                } else {
-                    // Validate index for single action mode
-                    if (index < 0 || index >= cached.actions.length) {
-                        return {
-                            content: [{
-                                type: 'text',
-                                text: `Invalid action index ${index}. Valid range: 0 to ${cached.actions.length - 1}`
-                            }],
-                            isError: true
-                        };
-                    }
-                    actionsToApply = [cached.actions[index]];
-                }
-                
                 // Track all affected URIs for cache invalidation and saving
                 const affectedUris = new Set<string>();
                 affectedUris.add(cached.uri.toString());
                 
                 let totalApplied = 0;
-                let resultMessage = applyAll 
-                    ? `Applying ${actionsToApply.length} quickfix action(s):\n\n`
-                    : '';
+                let resultMessage = '';
                 
-                // Apply each action
-                for (const action of actionsToApply) {
+                // Helper function to apply a single code action
+                const applySingleAction = async (action: vscode.CodeAction, targetUri: vscode.Uri): Promise<{ applied: boolean; message: string }> => {
                     logger.info(`[apply_code_action_code] Applying action: ${action.title}`);
                     logger.info(`[apply_code_action_code] Action has edit: ${!!action.edit}, has command: ${!!action.command}`);
                     
@@ -621,7 +620,7 @@ export function registerRefactorTools(server: McpServer): void {
                                 action.command.command.includes('typescript') && action.command.command.includes('fix');
                             
                             // Get document version before command execution for change detection
-                            const docBeforeCmd = await vscode.workspace.openTextDocument(cached.uri);
+                            const docBeforeCmd = await vscode.workspace.openTextDocument(targetUri);
                             const versionBefore = docBeforeCmd.version;
                             const contentBefore = docBeforeCmd.getText();
                             
@@ -655,7 +654,7 @@ export function registerRefactorTools(server: McpServer): void {
                                 await new Promise(resolve => setTimeout(resolve, 100));
                                 
                                 // Check if document was modified by the command
-                                const docAfterCmd = await vscode.workspace.openTextDocument(cached.uri);
+                                const docAfterCmd = await vscode.workspace.openTextDocument(targetUri);
                                 const versionAfter = docAfterCmd.version;
                                 const contentAfter = docAfterCmd.getText();
                                 
@@ -663,7 +662,7 @@ export function registerRefactorTools(server: McpServer): void {
                                     actionMessage += `Command "${action.command.command}" applied changes to document.\n`;
                                     actionApplied = true;
                                     // Save the document after TypeScript command modifications
-                                    await saveDocument(cached.uri);
+                                    await saveDocument(targetUri);
                                 } else {
                                     // Command executed but no changes made (maybe nothing to fix)
                                     actionMessage += `Command "${action.command.command}" executed but no changes were made.\n`;
@@ -680,10 +679,119 @@ export function registerRefactorTools(server: McpServer): void {
                         }
                     }
                     
-                    if (actionApplied) {
+                    return { applied: actionApplied, message: actionMessage };
+                };
+                
+                if (applyAll) {
+                    // applyAll mode: Apply quickfix actions one by one, re-fetching after each
+                    // This is necessary because applying one action changes the file content,
+                    // which invalidates the position information of subsequent cached actions
+                    const MAX_ITERATIONS = 50; // Safety limit to prevent infinite loops
+                    let iteration = 0;
+                    const targetUri = cached.uri;
+                    const originalRange = cached.range;
+                    
+                    // Get initial count of quickfix actions, excluding dangerous ones
+                    const allQuickfixes = cached.actions.filter(a => 
+                        a.kind?.value?.startsWith('quickfix') || a.isPreferred
+                    );
+                    const dangerousCount = allQuickfixes.filter(a => isDangerousQuickfix(a)).length;
+                    const safeQuickfixes = allQuickfixes.filter(a => !isDangerousQuickfix(a));
+                    
+                    if (safeQuickfixes.length === 0) {
+                        let message = `No safe quickfix actions found to apply.`;
+                        if (dangerousCount > 0) {
+                            message += ` ${dangerousCount} potentially dangerous action(s) were filtered out (e.g., "Remove unused declaration" which might delete useful code like logging statements).`;
+                            message += ` Use specific index to apply them individually if needed.`;
+                        } else {
+                            message += ` Available actions may be refactoring suggestions only.`;
+                        }
+                        return {
+                            content: [{
+                                type: 'text',
+                                text: message
+                            }],
+                            isError: true
+                        };
+                    }
+                    
+                    logger.info(`[apply_code_action_code] applyAll mode: found ${safeQuickfixes.length} safe quickfix actions (${dangerousCount} dangerous filtered out)`);
+                    resultMessage = `Applying quickfix actions (found ${safeQuickfixes.length} safe, ${dangerousCount} filtered as potentially dangerous):\n\n`;
+                    
+                    while (iteration < MAX_ITERATIONS) {
+                        iteration++;
+                        
+                        // Re-fetch code actions with fresh position information
+                        const document = await vscode.workspace.openTextDocument(targetUri);
+                        
+                        // Recalculate range based on current document
+                        const endLine = Math.min(originalRange.end.line, document.lineCount - 1);
+                        const endChar = document.lineAt(endLine).text.length;
+                        const currentRange = new vscode.Range(
+                            new vscode.Position(0, 0),  // Start from beginning
+                            new vscode.Position(endLine, endChar)
+                        );
+                        
+                        const freshActions = await vscode.commands.executeCommand<vscode.CodeAction[]>(
+                            'vscode.executeCodeActionProvider',
+                            targetUri,
+                            currentRange,
+                            'quickfix'
+                        ) || [];
+                        
+                        // Filter to quickfix actions only, excluding dangerous ones
+                        const quickfixActions = freshActions.filter(a => 
+                            (a.kind?.value?.startsWith('quickfix') || a.isPreferred) &&
+                            !isDangerousQuickfix(a)
+                        );
+                        
+                        if (quickfixActions.length === 0) {
+                            logger.info(`[apply_code_action_code] No more safe quickfix actions found, stopping`);
+                            break;
+                        }
+                        
+                        // Apply the first safe quickfix action
+                        const actionToApply = quickfixActions[0];
+                        const { applied, message } = await applySingleAction(actionToApply, targetUri);
+                        
+                        resultMessage += message + '\n';
+                        
+                        if (applied) {
+                            totalApplied++;
+                        } else {
+                            // If action failed to apply, try next one
+                            logger.warn(`[apply_code_action_code] Action failed to apply, will try next iteration`);
+                            // Remove this action from consideration by continuing
+                            // The re-fetch should give us different actions
+                        }
+                        
+                        // Small delay to allow VS Code to process changes
+                        await new Promise(resolve => setTimeout(resolve, 50));
+                    }
+                    
+                    if (iteration >= MAX_ITERATIONS) {
+                        resultMessage += `\n⚠ Reached maximum iteration limit (${MAX_ITERATIONS}). Some actions may not have been applied.\n`;
+                    }
+                } else {
+                    // Single action mode
+                    // Validate index for single action mode
+                    if (index < 0 || index >= cached.actions.length) {
+                        return {
+                            content: [{
+                                type: 'text',
+                                text: `Invalid action index ${index}. Valid range: 0 to ${cached.actions.length - 1}`
+                            }],
+                            isError: true
+                        };
+                    }
+                    
+                    const actionToApply = cached.actions[index];
+                    const { applied, message } = await applySingleAction(actionToApply, cached.uri);
+                    
+                    resultMessage = message;
+                    if (applied) {
                         totalApplied++;
                     }
-                    resultMessage += actionMessage + '\n';
                 }
                 
                 // Invalidate cache for all affected files
@@ -699,7 +807,7 @@ export function registerRefactorTools(server: McpServer): void {
                 
                 if (totalApplied > 0) {
                     if (applyAll) {
-                        resultMessage += `\n✓ Successfully applied ${totalApplied}/${actionsToApply.length} action(s).`;
+                        resultMessage += `\n✓ Successfully applied ${totalApplied} action(s).`;
                         resultMessage += `\n✓ All affected files have been saved to disk.`;
                         resultMessage += `\n✓ Cache has been invalidated for affected files.`;
                     }
