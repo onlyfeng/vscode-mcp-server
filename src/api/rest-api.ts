@@ -161,8 +161,18 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
                 return res.status(400).json({ error: 'path parameter is required' });
             }
 
-            const startLine = req.query.startLine ? parseInt(req.query.startLine as string) : undefined;
-            const endLine = req.query.endLine ? parseInt(req.query.endLine as string) : undefined;
+            const startLineParam = req.query.startLine as string | undefined;
+            const endLineParam = req.query.endLine as string | undefined;
+            const startLine = startLineParam ? parseInt(startLineParam) : undefined;
+            const endLine = endLineParam ? parseInt(endLineParam) : undefined;
+
+            // Validate parsed line numbers are valid integers
+            if (startLineParam && isNaN(startLine!)) {
+                return res.status(400).json({ error: 'startLine must be a valid integer' });
+            }
+            if (endLineParam && isNaN(endLine!)) {
+                return res.status(400).json({ error: 'endLine must be a valid integer' });
+            }
 
             if (!vscode.workspace.workspaceFolders) {
                 return res.status(400).json({ error: 'No workspace folder open' });
