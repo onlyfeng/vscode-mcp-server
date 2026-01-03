@@ -185,6 +185,13 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
                     const actualStart = Math.min(start, lineCount - 1);
                     const actualEnd = Math.min(end, lineCount - 1);
                     
+                    // Handle invalid range (start > end)
+                    if (actualStart > actualEnd) {
+                        return res.status(400).json({
+                            error: `Invalid range: startLine (${startLine}) cannot be greater than endLine (${endLine})`
+                        });
+                    }
+                    
                     const lines: string[] = [];
                     for (let i = actualStart; i <= actualEnd; i++) {
                         lines.push(document.lineAt(i).text);
@@ -361,9 +368,16 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
             const workspaceRoot = vscode.workspace.workspaceFolders[0].uri;
             const fileUri = vscode.Uri.joinPath(workspaceRoot, path);
 
+            // Open document and validate line number
+            const document = await vscode.workspace.openTextDocument(fileUri);
+            if (line < 1 || line > document.lineCount) {
+                return res.status(400).json({
+                    error: `Invalid line ${line}. Valid range: 1 to ${document.lineCount}`
+                });
+            }
+
             let charPosition = character;
             if (charPosition === undefined && symbol) {
-                const document = await vscode.workspace.openTextDocument(fileUri);
                 const lineText = document.lineAt(line - 1).text;
                 charPosition = lineText.indexOf(symbol);
                 if (charPosition === -1) {
@@ -420,9 +434,16 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
             const workspaceRoot = vscode.workspace.workspaceFolders[0].uri;
             const fileUri = vscode.Uri.joinPath(workspaceRoot, path);
 
+            // Open document and validate line number
+            const document = await vscode.workspace.openTextDocument(fileUri);
+            if (line < 1 || line > document.lineCount) {
+                return res.status(400).json({
+                    error: `Invalid line ${line}. Valid range: 1 to ${document.lineCount}`
+                });
+            }
+
             let charPosition = character;
             if (charPosition === undefined && symbol) {
-                const document = await vscode.workspace.openTextDocument(fileUri);
                 const lineText = document.lineAt(line - 1).text;
                 charPosition = lineText.indexOf(symbol);
                 if (charPosition === -1) {
@@ -597,8 +618,11 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
                 }
             } else {
                 // Apply single action
+                if (cached.actions.length === 0) {
+                    return res.status(400).json({ error: 'No actions available to apply' });
+                }
                 if (index < 0 || index >= cached.actions.length) {
-                    return res.status(400).json({ error: `Invalid index ${index}. Valid range: 0-${cached.actions.length - 1}` });
+                    return res.status(400).json({ error: `Invalid index ${index}. Valid range: 0 to ${cached.actions.length - 1}` });
                 }
 
                 const action = cached.actions[index];
@@ -649,9 +673,16 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
             const workspaceRoot = vscode.workspace.workspaceFolders[0].uri;
             const fileUri = vscode.Uri.joinPath(workspaceRoot, path);
 
+            // Open document and validate line number
+            const document = await vscode.workspace.openTextDocument(fileUri);
+            if (line < 1 || line > document.lineCount) {
+                return res.status(400).json({
+                    error: `Invalid line ${line}. Valid range: 1 to ${document.lineCount}`
+                });
+            }
+
             let charPosition = character;
             if (charPosition === undefined && symbol) {
-                const document = await vscode.workspace.openTextDocument(fileUri);
                 const lineText = document.lineAt(line - 1).text;
                 charPosition = lineText.indexOf(symbol);
                 if (charPosition === -1) {
