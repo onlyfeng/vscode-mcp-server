@@ -776,6 +776,13 @@ export function registerRefactorTools(server: McpServer): void {
                         
                         // Re-fetch code actions with fresh position information
                         const document = await vscode.workspace.openTextDocument(targetUri);
+                        
+                        // Handle empty documents - no code actions possible
+                        if (document.lineCount === 0) {
+                            logger.info(`[apply_code_action_code] Document is empty, no actions possible`);
+                            break;
+                        }
+                        
                         const currentContent = document.getText();
                         
                         // Check if document content changed from last iteration

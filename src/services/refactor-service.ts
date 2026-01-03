@@ -388,6 +388,12 @@ export async function applyAllQuickfixes(
         // Re-fetch code actions with fresh position information
         const document = await openDocument(targetUri);
         
+        // Handle empty documents - no code actions possible
+        if (document.lineCount === 0) {
+            logger.info(`[applyAllQuickfixes] Document is empty, no actions possible`);
+            break;
+        }
+        
         // Recalculate range based on current document
         const endLine = Math.min(originalRange.end.line, document.lineCount - 1);
         const endChar = document.lineAt(endLine).text.length;
