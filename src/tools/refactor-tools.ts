@@ -40,6 +40,59 @@ function cleanupExpiredCache(): void {
 }
 
 /**
+ * Invalidate all cache entries related to a specific file URI
+ * This should be called after applying edits to ensure fresh code actions
+ */
+function invalidateCacheForUri(uri: vscode.Uri): void {
+    const uriString = uri.toString();
+    for (const [key, value] of codeActionsCache.entries()) {
+        if (value.uri.toString() === uriString) {
+            codeActionsCache.delete(key);
+            logger.info(`[invalidateCacheForUri] Invalidated cache entry ${key} for uri: ${uriString}`);
+        }
+    }
+}
+
+/**
+ * Save a document by URI (following edit-tools.ts pattern)
+ * Uses vscode.workspace.openTextDocument to ensure document is accessible
+ * @param uri The URI of the document to save
+ */
+async function saveDocument(uri: vscode.Uri): Promise<boolean> {
+    try {
+        // Use openTextDocument to get/open the document (same pattern as edit-tools.ts)
+        const document = await vscode.workspace.openTextDocument(uri);
+        if (document.isDirty) {
+            await document.save();
+            logger.info(`[saveDocument] Saved document: ${uri.fsPath}`);
+        }
+        return true;
+    } catch (error) {
+        logger.warn(`[saveDocument] Failed to save document ${uri.fsPath}: ${error instanceof Error ? error.message : String(error)}`);
+        return false;
+    }
+}
+
+/**
+ * Save all documents affected by a WorkspaceEdit
+ * Uses Promise.all for parallel saving to improve performance
+ * @param edit The workspace edit that was applied
+ */
+async function saveAffectedDocuments(edit: vscode.WorkspaceEdit): Promise<void> {
+    // Collect unique URIs from the edit
+    const affectedUris = new Set<string>();
+    for (const [uri] of edit.entries()) {
+        affectedUris.add(uri.toString());
+    }
+    
+    // Save all documents in parallel and wait for all to complete
+    const savePromises = Array.from(affectedUris).map(uriString => 
+        saveDocument(vscode.Uri.parse(uriString))
+    );
+    await Promise.all(savePromises);
+}
+
+/**
  * Converts a workspace URI to a path relative to the workspace root
  * @param uri The URI to convert
  * @returns Path relative to workspace root
@@ -396,13 +449,15 @@ export function registerRefactorTools(server: McpServer): void {
 
         WHEN TO USE: After listing code actions, to apply a specific fix or refactoring.
         
-        Requires the requestId from list_code_actions_code (valid for 60 seconds) and the action index.`,
+        Requires the requestId from list_code_actions_code (valid for 60 seconds) and the action index.
+        Use applyAll=true to apply all quickfix actions in sequence (useful for fixing multiple similar issues).`,
         {
             requestId: z.string().describe('The request ID from list_code_actions_code'),
-            index: z.number().describe('The index of the action to apply (from the list)')
+            index: z.number().describe('The index of the action to apply (from the list). Ignored if applyAll=true.'),
+            applyAll: z.boolean().optional().default(false).describe('Apply all quickfix actions in sequence (default: false). When true, ignores index parameter.')
         },
-        async ({ requestId, index }): Promise<CallToolResult> => {
-            logger.info(`[apply_code_action_code] Tool called with requestId="${requestId}", index=${index}`);
+        async ({ requestId, index, applyAll = false }): Promise<CallToolResult> => {
+            logger.info(`[apply_code_action_code] Tool called with requestId="${requestId}", index=${index}, applyAll=${applyAll}`);
             
             // Cleanup expired cache entries
             cleanupExpiredCache();
@@ -433,66 +488,185 @@ export function registerRefactorTools(server: McpServer): void {
                     };
                 }
                 
-                // Validate index
-                if (index < 0 || index >= cached.actions.length) {
-                    return {
-                        content: [{
-                            type: 'text',
-                            text: `Invalid action index ${index}. Valid range: 0 to ${cached.actions.length - 1}`
-                        }],
-                        isError: true
-                    };
-                }
-                
-                const action = cached.actions[index];
-                logger.info(`[apply_code_action_code] Applying action: ${action.title}`);
-                
-                let applied = false;
-                let resultMessage = `Applying code action: "${action.title}"\n\n`;
-                
-                // Apply workspace edit if present
-                if (action.edit) {
-                    const editSuccess = await vscode.workspace.applyEdit(action.edit);
-                    if (editSuccess) {
-                        resultMessage += `Workspace edit applied successfully.\n`;
-                        resultMessage += formatWorkspaceEditSummary(action.edit) + '\n';
-                        applied = true;
-                    } else {
+                // Determine which actions to apply
+                let actionsToApply: vscode.CodeAction[];
+                if (applyAll) {
+                    // Filter to only quickfix actions for safety
+                    actionsToApply = cached.actions.filter(a => 
+                        a.kind?.value?.startsWith('quickfix') || a.isPreferred
+                    );
+                    if (actionsToApply.length === 0) {
                         return {
                             content: [{
                                 type: 'text',
-                                text: `Failed to apply workspace edit for action "${action.title}".`
+                                text: `No quickfix actions found to apply. Available actions may be refactoring suggestions only.`
                             }],
                             isError: true
                         };
                     }
-                }
-                
-                // Execute command if present
-                if (action.command) {
-                    try {
-                        await vscode.commands.executeCommand(
-                            action.command.command,
-                            ...(action.command.arguments || [])
-                        );
-                        resultMessage += `Command "${action.command.command}" executed successfully.\n`;
-                        applied = true;
-                    } catch (cmdError) {
-                        logger.error(`[apply_code_action_code] Command execution failed: ${cmdError instanceof Error ? cmdError.message : String(cmdError)}`);
+                    logger.info(`[apply_code_action_code] applyAll mode: found ${actionsToApply.length} quickfix actions`);
+                } else {
+                    // Validate index for single action mode
+                    if (index < 0 || index >= cached.actions.length) {
                         return {
                             content: [{
                                 type: 'text',
-                                text: `Failed to execute command for action "${action.title}": ${cmdError instanceof Error ? cmdError.message : String(cmdError)}`
+                                text: `Invalid action index ${index}. Valid range: 0 to ${cached.actions.length - 1}`
                             }],
                             isError: true
                         };
                     }
+                    actionsToApply = [cached.actions[index]];
                 }
                 
-                // Remove from cache after successful application
+                // Track all affected URIs for cache invalidation and saving
+                const affectedUris = new Set<string>();
+                affectedUris.add(cached.uri.toString());
+                
+                let totalApplied = 0;
+                let resultMessage = applyAll 
+                    ? `Applying ${actionsToApply.length} quickfix action(s):\n\n`
+                    : '';
+                
+                // Apply each action
+                for (const action of actionsToApply) {
+                    logger.info(`[apply_code_action_code] Applying action: ${action.title}`);
+                    logger.info(`[apply_code_action_code] Action has edit: ${!!action.edit}, has command: ${!!action.command}`);
+                    
+                    let actionApplied = false;
+                    let actionMessage = `Applying code action: "${action.title}"\n`;
+                    
+                    // For actions with only command, try to resolve to get the edit
+                    if (!action.edit && action.command) {
+                        logger.info(`[apply_code_action_code] Resolving code action to get edit...`);
+                        try {
+                            const resolvedAction = await vscode.commands.executeCommand<vscode.CodeAction>(
+                                'vscode.resolveCodeAction',
+                                action
+                            );
+                            if (resolvedAction && resolvedAction.edit) {
+                                logger.info(`[apply_code_action_code] Resolved action has edit`);
+                                action.edit = resolvedAction.edit;
+                            }
+                        } catch (resolveError) {
+                            logger.warn(`[apply_code_action_code] Could not resolve code action: ${resolveError instanceof Error ? resolveError.message : String(resolveError)}`);
+                        }
+                    }
+                    
+                    // Apply workspace edit if present
+                    if (action.edit) {
+                        const editSuccess = await vscode.workspace.applyEdit(action.edit);
+                        if (editSuccess) {
+                            actionMessage += `Workspace edit applied successfully.\n`;
+                            actionMessage += formatWorkspaceEditSummary(action.edit) + '\n';
+                            actionApplied = true;
+                            
+                            // Track affected URIs
+                            for (const [uri] of action.edit.entries()) {
+                                affectedUris.add(uri.toString());
+                            }
+                            
+                            // Save affected documents immediately to ensure consistency
+                            await saveAffectedDocuments(action.edit);
+                        } else {
+                            actionMessage += `Failed to apply workspace edit.\n`;
+                            logger.error(`[apply_code_action_code] Failed to apply workspace edit for action: ${action.title}`);
+                        }
+                    }
+                    
+                    // Execute command if present
+                    if (action.command) {
+                        try {
+                            logger.info(`[apply_code_action_code] Executing command: ${action.command.command}`);
+                            
+                            // For TypeScript fix-all commands, we need special handling
+                            // These commands modify documents directly without returning a WorkspaceEdit
+                            const isTypescriptFixAll = action.command.command.includes('applyFixAllCodeAction') ||
+                                action.command.command.includes('typescript') && action.command.command.includes('fix');
+                            
+                            // Get document version before command execution for change detection
+                            const docBeforeCmd = await vscode.workspace.openTextDocument(cached.uri);
+                            const versionBefore = docBeforeCmd.version;
+                            const contentBefore = docBeforeCmd.getText();
+                            
+                            const commandResult = await vscode.commands.executeCommand(
+                                action.command.command,
+                                ...(action.command.arguments || [])
+                            );
+                            
+                            // Some commands return a WorkspaceEdit
+                            if (commandResult && typeof commandResult === 'object' && 'size' in commandResult) {
+                                const edit = commandResult as vscode.WorkspaceEdit;
+                                if (edit.size > 0) {
+                                    const editSuccess = await vscode.workspace.applyEdit(edit);
+                                    if (editSuccess) {
+                                        actionMessage += `Command returned workspace edit, applied successfully.\n`;
+                                        actionMessage += formatWorkspaceEditSummary(edit) + '\n';
+                                        actionApplied = true;
+                                        
+                                        // Track affected URIs and save
+                                        for (const [uri] of edit.entries()) {
+                                            affectedUris.add(uri.toString());
+                                        }
+                                        await saveAffectedDocuments(edit);
+                                    }
+                                }
+                            }
+                            
+                            // For TypeScript fix-all commands, wait a bit and check if document changed
+                            if (!actionApplied && isTypescriptFixAll) {
+                                // Wait for VS Code to process the command
+                                await new Promise(resolve => setTimeout(resolve, 100));
+                                
+                                // Check if document was modified by the command
+                                const docAfterCmd = await vscode.workspace.openTextDocument(cached.uri);
+                                const versionAfter = docAfterCmd.version;
+                                const contentAfter = docAfterCmd.getText();
+                                
+                                if (versionAfter !== versionBefore || contentAfter !== contentBefore) {
+                                    actionMessage += `Command "${action.command.command}" applied changes to document.\n`;
+                                    actionApplied = true;
+                                    // Save the document after TypeScript command modifications
+                                    await saveDocument(cached.uri);
+                                } else {
+                                    // Command executed but no changes made (maybe nothing to fix)
+                                    actionMessage += `Command "${action.command.command}" executed but no changes were made.\n`;
+                                    logger.warn(`[apply_code_action_code] TypeScript fix-all command executed but document unchanged`);
+                                    // Don't mark as applied if nothing changed
+                                }
+                            } else if (!actionApplied) {
+                                actionMessage += `Command "${action.command.command}" executed successfully.\n`;
+                                actionApplied = true;
+                            }
+                        } catch (cmdError) {
+                            actionMessage += `Command execution failed: ${cmdError instanceof Error ? cmdError.message : String(cmdError)}\n`;
+                            logger.error(`[apply_code_action_code] Command execution failed: ${cmdError instanceof Error ? cmdError.message : String(cmdError)}`);
+                        }
+                    }
+                    
+                    if (actionApplied) {
+                        totalApplied++;
+                    }
+                    resultMessage += actionMessage + '\n';
+                }
+                
+                // Invalidate cache for all affected files
+                for (const uriString of affectedUris) {
+                    invalidateCacheForUri(vscode.Uri.parse(uriString));
+                }
+                
+                // Also remove the current request from cache
                 codeActionsCache.delete(requestId);
                 
-                if (applied) {
+                // Force save the main document if not already saved
+                await saveDocument(cached.uri);
+                
+                if (totalApplied > 0) {
+                    if (applyAll) {
+                        resultMessage += `\n✓ Successfully applied ${totalApplied}/${actionsToApply.length} action(s).`;
+                        resultMessage += `\n✓ All affected files have been saved to disk.`;
+                        resultMessage += `\n✓ Cache has been invalidated for affected files.`;
+                    }
                     return {
                         content: [{
                             type: 'text',
@@ -503,8 +677,9 @@ export function registerRefactorTools(server: McpServer): void {
                     return {
                         content: [{
                             type: 'text',
-                            text: `Code action "${action.title}" has no edit or command to apply.`
-                        }]
+                            text: `No actions were successfully applied.`
+                        }],
+                        isError: true
                     };
                 }
             } catch (error) {

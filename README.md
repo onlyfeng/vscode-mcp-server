@@ -255,12 +255,15 @@ The extension creates an MCP server that:
 - **apply_code_action_code**: Apply a code action from a previous list_code_actions_code call
   - Parameters:
     - `requestId`: The request ID from list_code_actions_code
-    - `index`: The index of the action to apply (from the list)
+    - `index`: The index of the action to apply (from the list). Ignored if applyAll=true.
+    - `applyAll` (optional): Apply all quickfix actions in sequence (default: false). When true, ignores index parameter.
   
-  This tool is useful for:
+  This tool provides:
   - Applying quick fixes for linter errors
   - Executing refactoring operations
-  - Automating code improvements
+  - Batch apply all quickfix actions with applyAll=true
+  - Auto-save affected files after applying edits
+  - Auto-invalidate cache for affected files
 
 ## Caveats/TODO
 
