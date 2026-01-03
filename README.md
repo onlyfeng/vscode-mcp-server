@@ -309,6 +309,49 @@ http://[your-host]:3000/mcp
 
 Remember that you need to enable the server first by clicking on the status bar item!
 
+## REST API for Script Access
+
+In addition to the MCP protocol, the server also exposes a REST API at `/api` for direct HTTP access from scripts. This is useful for AI coding agents using skills.
+
+### Available REST Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/health` | GET | Health check |
+| `/api/info` | GET | Server info and available endpoints |
+| `/api/files/list` | GET | List files (params: `path`, `recursive`) |
+| `/api/files/read` | GET | Read file (params: `path`, `startLine`, `endLine`) |
+| `/api/diagnostics` | GET | Get diagnostics (params: `path`) |
+| `/api/symbols/document` | GET | Document symbols (params: `path`) |
+| `/api/symbols/workspace` | GET | Search symbols (params: `query`) |
+| `/api/symbols/references` | GET | Find references (params: `path`, `line`, `character`/`symbol`) |
+| `/api/symbols/definition` | GET | Go to definition (params: `path`, `line`, `character`/`symbol`) |
+
+### Example Usage
+
+```bash
+# Health check
+curl http://127.0.0.1:3000/api/health
+
+# Get diagnostics for a file
+curl "http://127.0.0.1:3000/api/diagnostics?path=src/main.ts"
+
+# Find references to a symbol
+curl "http://127.0.0.1:3000/api/symbols/references?path=src/main.ts&line=10&symbol=myFunction"
+```
+
+### OpenSkills Integration
+
+A skill package is available for AI agents using OpenSkills:
+
+```bash
+# Install from this repository
+openskills install juehang/vscode-mcp-server --subdir skills/vscode-mcp
+
+# Or install from local path
+openskills install ./skills/vscode-mcp
+```
+
 ## Contributing
 
 Contributions are welcome! Feel free to submit issues or pull requests.

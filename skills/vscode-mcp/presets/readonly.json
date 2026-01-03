@@ -1,0 +1,10 @@
+{
+  "vscode-mcp-server.enabledTools": {
+    "file": true,
+    "edit": false,
+    "shell": false,
+    "diagnostics": true,
+    "symbol": true,
+    "refactor": false
+  }
+}

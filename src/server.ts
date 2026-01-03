@@ -9,6 +9,7 @@ import { registerShellTools } from './tools/shell-tools';
 import { registerDiagnosticsTools } from './tools/diagnostics-tools';
 import { registerSymbolTools } from './tools/symbol-tools';
 import { registerRefactorTools } from './tools/refactor-tools';
+import { createRestApiRouter } from './api/rest-api';
 import { logger } from './utils/logger';
 
 export interface ToolConfiguration {
@@ -131,6 +132,11 @@ export class MCPServer {
     }
 
     private setupRoutes(): void {
+        // Mount REST API router for skill script direct access
+        const restApiRouter = createRestApiRouter();
+        this.app.use('/api', restApiRouter);
+        logger.info('REST API endpoints mounted at /api');
+
         // Handle POST requests for client-to-server communication
         this.app.post('/mcp', async (req, res) => {
             logger.info(`Request received: ${req.method} ${req.url}`);
