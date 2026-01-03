@@ -498,6 +498,13 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
                 });
             }
             
+            // Validate startLine <= actualEndLine
+            if (startLine > actualEndLine) {
+                return res.status(400).json({
+                    error: `Invalid range: startLine (${startLine}) cannot be greater than endLine (${actualEndLine})`
+                });
+            }
+            
             const endChar = document.lineAt(actualEndLine - 1).text.length;
 
             const range = new vscode.Range(

@@ -380,6 +380,17 @@ export function registerRefactorTools(server: McpServer): void {
                     };
                 }
                 
+                // Validate startLine <= actualEndLine
+                if (startLine > actualEndLine) {
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: `Invalid range: startLine (${startLine}) cannot be greater than endLine (${actualEndLine})`
+                        }],
+                        isError: true
+                    };
+                }
+                
                 const actualEndChar = endCharacter ?? document.lineAt(actualEndLine - 1).text.length;
                 
                 const range = new vscode.Range(
