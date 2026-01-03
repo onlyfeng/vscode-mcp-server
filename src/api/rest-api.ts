@@ -737,6 +737,18 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
                     return res.status(500).json({ error: 'Failed to apply rename' });
                 }
 
+                // Save affected documents to disk
+                for (const [uri] of workspaceEdit.entries()) {
+                    try {
+                        const doc = await vscode.workspace.openTextDocument(uri);
+                        if (doc.isDirty) {
+                            await doc.save();
+                        }
+                    } catch (saveError) {
+                        logger.warn(`[REST API] Failed to save ${uri.fsPath}: ${saveError}`);
+                    }
+                }
+
                 res.json({
                     success: true,
                     applied: true,
