@@ -476,6 +476,18 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
 
             const document = await vscode.workspace.openTextDocument(fileUri);
             
+            // Handle empty files
+            if (document.lineCount === 0) {
+                // Empty file has no code actions
+                const requestId = `ca_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+                return res.json({
+                    requestId,
+                    actions: [],
+                    count: 0,
+                    expiresIn: '60 seconds'
+                });
+            }
+            
             // Validate startLine is within bounds
             if (startLine < 1 || startLine > document.lineCount) {
                 return res.status(400).json({ 
@@ -493,7 +505,7 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
                 });
             }
             
-            const endChar = document.lineAt(Math.min(actualEndLine - 1, document.lineCount - 1)).text.length;
+            const endChar = document.lineAt(actualEndLine - 1).text.length;
 
             const range = new vscode.Range(
                 new vscode.Position(startLine - 1, 0),
