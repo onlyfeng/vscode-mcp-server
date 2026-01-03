@@ -655,7 +655,7 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
                 }
             }
 
-            const position = new vscode.Position(line - 1, charPosition);
+            const position = new vscode.Position(line - 1, charPosition!);
 
             // Execute rename provider
             const workspaceEdit = await vscode.commands.executeCommand<vscode.WorkspaceEdit>(
