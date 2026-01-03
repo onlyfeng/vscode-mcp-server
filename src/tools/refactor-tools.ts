@@ -718,6 +718,10 @@ export function registerRefactorTools(server: McpServer): void {
                     logger.info(`[apply_code_action_code] applyAll mode: found ${safeQuickfixes.length} safe quickfix actions (${dangerousCount} dangerous filtered out)`);
                     resultMessage = `Applying quickfix actions (found ${safeQuickfixes.length} safe, ${dangerousCount} filtered as potentially dangerous):\n\n`;
                     
+                    // Track processed action titles to avoid retrying them
+                    // This includes both failed actions AND actions that executed but may not have changed the file
+                    const processedActionTitles = new Set<string>();
+                    
                     while (iteration < MAX_ITERATIONS) {
                         iteration++;
                         
@@ -739,10 +743,11 @@ export function registerRefactorTools(server: McpServer): void {
                             'quickfix'
                         ) || [];
                         
-                        // Filter to quickfix actions only, excluding dangerous ones
+                        // Filter to quickfix actions only, excluding dangerous ones and previously processed ones
                         const quickfixActions = freshActions.filter(a => 
                             (a.kind?.value?.startsWith('quickfix') || a.isPreferred) &&
-                            !isDangerousQuickfix(a)
+                            !isDangerousQuickfix(a) &&
+                            !processedActionTitles.has(a.title)
                         );
                         
                         if (quickfixActions.length === 0) {
@@ -756,13 +761,15 @@ export function registerRefactorTools(server: McpServer): void {
                         
                         resultMessage += message + '\n';
                         
+                        // Always track processed actions to avoid retrying them
+                        // This prevents infinite loops when an action executes but doesn't change the file
+                        processedActionTitles.add(actionToApply.title);
+                        
                         if (applied) {
                             totalApplied++;
+                            logger.info(`[apply_code_action_code] Action "${actionToApply.title}" applied successfully`);
                         } else {
-                            // If action failed to apply, try next one
-                            logger.warn(`[apply_code_action_code] Action failed to apply, will try next iteration`);
-                            // Remove this action from consideration by continuing
-                            // The re-fetch should give us different actions
+                            logger.warn(`[apply_code_action_code] Action "${actionToApply.title}" failed to apply (${processedActionTitles.size} processed so far)`);
                         }
                         
                         // Small delay to allow VS Code to process changes
