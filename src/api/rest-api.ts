@@ -172,10 +172,17 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
             let lineCount = document.lineCount;
 
             if (startLine !== undefined || endLine !== undefined) {
-                const start = startLine ? startLine - 1 : 0;
-                const end = endLine === -1 ? lineCount - 1 : (endLine ? endLine - 1 : lineCount - 1);
+                // Handle startLine: undefined or -1 means beginning of file, otherwise convert 1-based to 0-based
+                const start = (startLine === undefined || startLine === -1) ? 0 : Math.max(0, startLine - 1);
+                // Handle endLine: undefined or -1 means end of file, otherwise convert 1-based to 0-based
+                const end = (endLine === undefined || endLine === -1) ? lineCount - 1 : Math.max(0, endLine - 1);
+                
+                // Validate range
+                const actualStart = Math.min(start, lineCount - 1);
+                const actualEnd = Math.min(end, lineCount - 1);
+                
                 const lines: string[] = [];
-                for (let i = start; i <= Math.min(end, lineCount - 1); i++) {
+                for (let i = actualStart; i <= actualEnd; i++) {
                     lines.push(document.lineAt(i).text);
                 }
                 content = lines.join('\n');
