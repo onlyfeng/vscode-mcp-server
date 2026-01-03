@@ -118,11 +118,13 @@ The extension creates an MCP server that:
     - `path`: The path to list files from
     - `recursive` (optional): Whether to list files recursively
 
-- **read_file_code**: Reads file contents
+- **read_file_code**: Reads file contents with support for partial reading
   - Parameters:
     - `path`: The path to the file to read
     - `encoding` (optional): File encoding (default: utf-8)
     - `maxCharacters` (optional): Maximum character count (default: 100,000)
+    - `startLine` (optional): Start line number (1-based). Use -1 for beginning of file (default).
+    - `endLine` (optional): End line number (1-based). Use -1 for end of file (default).
 
 ### Edit Tools
 - **create_file_code**: Creates a new file using VS Code's WorkspaceEdit API
