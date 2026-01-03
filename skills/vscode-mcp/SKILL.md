@@ -19,7 +19,7 @@ Add to your VS Code `settings.json` to enable only semantic tools:
     "file": false,
     "edit": false,
     "shell": false,
-    "diagnostics": true,
+    "diagnostics": false,
     "symbol": true,
     "refactor": true
   }
@@ -27,8 +27,8 @@ Add to your VS Code `settings.json` to enable only semantic tools:
 ```
 
 This configuration:
-- ❌ Disables file/edit/shell (use Claude Code's native tools)
-- ✅ Enables diagnostics (linter errors, warnings)
+- ❌ Disables file/edit/shell (use Cursor/Claude Code's native tools)
+- ❌ Disables diagnostics (Cursor has built-in linter integration)
 - ✅ Enables symbol tools (document symbols, workspace search, references, definitions)
 - ✅ Enables refactor tools (rename, code actions)
 

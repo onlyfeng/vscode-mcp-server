@@ -3,7 +3,7 @@
     "file": true,
     "edit": false,
     "shell": false,
-    "diagnostics": true,
+    "diagnostics": false,
     "symbol": true,
     "refactor": false
   }
