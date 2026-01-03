@@ -663,8 +663,9 @@ export function registerRefactorTools(server: McpServer): void {
                     const originalRange = cached.range;
                     
                     // Get initial count of quickfix actions, excluding dangerous ones
-                    const allQuickfixes = cached.actions.filter(a => 
-                        a.kind?.value?.startsWith('quickfix') || a.isPreferred
+                    // Only filter by quickfix kind, not isPreferred (which could include non-quickfix actions)
+                    const allQuickfixes = cached.actions.filter(a =>
+                        a.kind?.value?.startsWith('quickfix')
                     );
                     const dangerousCount = allQuickfixes.filter(a => isDangerousQuickfix(a)).length;
                     const safeQuickfixes = allQuickfixes.filter(a => !isDangerousQuickfix(a));
@@ -715,8 +716,9 @@ export function registerRefactorTools(server: McpServer): void {
                         ) || [];
                         
                         // Filter to quickfix actions only, excluding dangerous ones and previously processed ones
-                        const quickfixActions = freshActions.filter(a => 
-                            (a.kind?.value?.startsWith('quickfix') || a.isPreferred) &&
+                        // Only filter by quickfix kind, not isPreferred (which could include non-quickfix actions)
+                        const quickfixActions = freshActions.filter(a =>
+                            a.kind?.value?.startsWith('quickfix') &&
                             !isDangerousQuickfix(a) &&
                             !processedActionTitles.has(a.title)
                         );

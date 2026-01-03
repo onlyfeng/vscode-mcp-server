@@ -622,9 +622,9 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
             const results: string[] = [];
 
             if (applyAll) {
-                // Apply all quickfix actions
+                // Apply all quickfix actions (only quickfix kind, not other preferred actions)
                 const quickfixes = cached.actions.filter(a => 
-                    a.kind?.value?.startsWith('quickfix') || a.isPreferred
+                    a.kind?.value?.startsWith('quickfix')
                 );
 
                 for (const action of quickfixes) {
