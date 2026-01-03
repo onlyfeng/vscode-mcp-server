@@ -321,12 +321,15 @@ export function registerRefactorTools(server: McpServer): void {
 
         WHEN TO USE: Finding available fixes for diagnostics, discovering refactoring options.
         
+        SCANNING ENTIRE FILE: Use startLine=1 and endLine=-1 to scan the entire file for all available code actions.
+        This is the recommended approach when you need to check the whole file for issues or refactoring opportunities.
+        
         Returns a requestId that can be used with apply_code_action_code. Results are cached for 60 seconds.`,
         {
             path: z.string().describe('The path to the file'),
-            startLine: z.number().describe('Start line of the range (1-based)'),
+            startLine: z.number().describe('Start line of the range (1-based). Use 1 for scanning from the beginning.'),
             startCharacter: z.number().optional().default(0).describe('Start character of the range (0-based, default: 0)'),
-            endLine: z.number().optional().describe('End line of the range (1-based, default: same as startLine)'),
+            endLine: z.number().optional().describe('End line of the range (1-based). Use -1 for end of file. Default: same as startLine.'),
             endCharacter: z.number().optional().describe('End character of the range (0-based, default: end of line)'),
             onlyKinds: z.array(z.string()).optional().describe('Filter by code action kinds (e.g., ["quickfix", "refactor"])'),
             includeSourceActions: z.boolean().optional().default(false).describe('Include source actions like organize imports (default: false)')
@@ -362,14 +365,24 @@ export function registerRefactorTools(server: McpServer): void {
                     };
                 }
                 
-                const actualEndLine = endLine ?? startLine;
+                // Handle endLine: -1 means end of file, undefined means same as startLine
+                let actualEndLine: number;
+                if (endLine === -1) {
+                    // -1 means scan to end of file
+                    actualEndLine = document.lineCount;
+                    logger.info(`[list_code_actions_code] endLine=-1 resolved to line ${actualEndLine} (end of file)`);
+                } else if (endLine === undefined) {
+                    actualEndLine = startLine;
+                } else {
+                    actualEndLine = endLine;
+                }
                 
                 // Validate actualEndLine is within document bounds
                 if (actualEndLine < 1 || actualEndLine > document.lineCount) {
                     return {
                         content: [{
                             type: 'text',
-                            text: `Invalid endLine ${actualEndLine}. File has ${document.lineCount} lines (valid range: 1 to ${document.lineCount}).`
+                            text: `Invalid endLine ${actualEndLine}. File has ${document.lineCount} lines (valid range: 1 to ${document.lineCount}, or -1 for end of file).`
                         }],
                         isError: true
                     };

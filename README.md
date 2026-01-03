@@ -240,9 +240,9 @@ The extension creates an MCP server that:
 - **list_code_actions_code**: List available code actions (quick fixes, refactorings) for a code range
   - Parameters:
     - `path`: The path to the file
-    - `startLine`: Start line of the range (1-based)
+    - `startLine`: Start line of the range (1-based). Use 1 for scanning from the beginning.
     - `startCharacter` (optional): Start character of the range (0-based, default: 0)
-    - `endLine` (optional): End line of the range (1-based, default: same as startLine)
+    - `endLine` (optional): End line of the range (1-based). **Use -1 to scan to end of file.** Default: same as startLine.
     - `endCharacter` (optional): End character of the range (0-based, default: end of line)
     - `onlyKinds` (optional): Filter by code action kinds (e.g., ["quickfix", "refactor"])
     - `includeSourceActions` (optional): Include source actions like organize imports (default: false)
@@ -251,6 +251,7 @@ The extension creates an MCP server that:
   - Available quick fixes for diagnostics
   - Refactoring options (extract method, inline variable, etc.)
   - A requestId for use with apply_code_action_code (valid for 60 seconds)
+  - **Scan entire file**: Use `startLine=1, endLine=-1` to check the whole file for all available code actions
 
 - **apply_code_action_code**: Apply a code action from a previous list_code_actions_code call
   - Parameters:
