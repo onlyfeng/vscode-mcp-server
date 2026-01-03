@@ -60,11 +60,15 @@ async function applyCodeAction(action: vscode.CodeAction, targetUri: vscode.Uri)
         if (action.edit) {
             const success = await vscode.workspace.applyEdit(action.edit);
             if (success) {
-                // Save affected documents
+                // Save affected documents (don't fail if save fails)
                 for (const [uri] of action.edit.entries()) {
-                    const doc = await vscode.workspace.openTextDocument(uri);
-                    if (doc.isDirty) {
-                        await doc.save();
+                    try {
+                        const doc = await vscode.workspace.openTextDocument(uri);
+                        if (doc.isDirty) {
+                            await doc.save();
+                        }
+                    } catch (saveError) {
+                        logger.warn(`[applyCodeAction] Failed to save ${uri.fsPath}: ${saveError}`);
                     }
                 }
                 return true;
@@ -505,10 +509,16 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
         try {
             const path = req.query.path as string;
             const startLine = parseInt(req.query.startLine as string);
-            const endLine = req.query.endLine ? parseInt(req.query.endLine as string) : startLine;
+            const endLineParam = req.query.endLine as string | undefined;
+            const endLine = endLineParam ? parseInt(endLineParam) : startLine;
 
             if (!path || isNaN(startLine)) {
                 return res.status(400).json({ error: 'path and startLine parameters are required' });
+            }
+
+            // Validate endLine is a valid number if provided
+            if (endLineParam && isNaN(endLine)) {
+                return res.status(400).json({ error: 'endLine must be a valid integer' });
             }
 
             if (!vscode.workspace.workspaceFolders) {
@@ -676,12 +686,22 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
         try {
             const { path, line, character, symbol, newName, apply = true } = req.body;
 
-            if (!path || !line || !newName) {
+            if (!path || line === undefined || line === null || !newName) {
                 return res.status(400).json({ error: 'path, line, and newName are required' });
+            }
+
+            // Validate line is a valid number
+            if (typeof line !== 'number' || isNaN(line) || !Number.isInteger(line)) {
+                return res.status(400).json({ error: 'line must be a valid integer' });
             }
 
             if (character === undefined && !symbol) {
                 return res.status(400).json({ error: 'Either character or symbol is required' });
+            }
+
+            // Validate character is a valid number if provided
+            if (character !== undefined && (typeof character !== 'number' || isNaN(character) || !Number.isInteger(character))) {
+                return res.status(400).json({ error: 'character must be a valid integer' });
             }
 
             if (!vscode.workspace.workspaceFolders) {
