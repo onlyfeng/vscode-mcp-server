@@ -136,7 +136,7 @@ The extension creates an MCP server that:
   - Parameters:
     - `path`: The path to the file to modify
     - `startLine`: The start line number (1-based, inclusive)
-    - `endLine`: The end line number (1-based, inclusive)
+    - `endLine`: The end line number (1-based, inclusive). **Use -1 to replace to end of file.**
     - `content`: The new content to replace the lines with
     - `originalCode`: The original code for validation
 

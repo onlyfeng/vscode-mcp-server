@@ -67,7 +67,7 @@ export async function createWorkspaceFile(
  * Replaces specific lines in a file in the VS Code workspace
  * @param workspacePath The path within the workspace to the file
  * @param startLine The start line number (0-based, inclusive)
- * @param endLine The end line number (0-based, inclusive)
+ * @param endLine The end line number (0-based, inclusive). Use -1 to replace to end of file.
  * @param content The new content to replace the lines with
  * @param originalCode The original code for validation
  * @returns Promise that resolves when the edit operation completes
@@ -96,17 +96,23 @@ export async function replaceWorkspaceFileLines(
         // Open the document (or get it if already open)
         const document = await vscode.workspace.openTextDocument(fileUri);
         
+        // Handle endLine: -1 means end of file
+        const actualEndLine = endLine === -1 ? document.lineCount - 1 : endLine;
+        if (endLine === -1) {
+            console.log(`[replaceWorkspaceFileLines] endLine=-1 resolved to line ${actualEndLine + 1} (end of file)`);
+        }
+        
         // Validate line numbers
         if (startLine < 0 || startLine >= document.lineCount) {
             throw new Error(`Start line ${startLine + 1} is out of range (1-${document.lineCount})`);
         }
-        if (endLine < startLine || endLine >= document.lineCount) {
-            throw new Error(`End line ${endLine + 1} is out of range (${startLine + 1}-${document.lineCount})`);
+        if (actualEndLine < startLine || actualEndLine >= document.lineCount) {
+            throw new Error(`End line ${actualEndLine + 1} is out of range (${startLine + 1}-${document.lineCount})`);
         }
         
         // Get the current content of the lines
         const currentLines = [];
-        for (let i = startLine; i <= endLine; i++) {
+        for (let i = startLine; i <= actualEndLine; i++) {
             currentLines.push(document.lineAt(i).text);
         }
         const currentContent = currentLines.join('\n');
@@ -118,7 +124,7 @@ export async function replaceWorkspaceFileLines(
         
         // Create a range for the lines to replace
         const startPos = new vscode.Position(startLine, 0);
-        const endPos = new vscode.Position(endLine, document.lineAt(endLine).text.length);
+        const endPos = new vscode.Position(actualEndLine, document.lineAt(actualEndLine).text.length);
         const range = new vscode.Range(startPos, endPos);
         
         // Get the active text editor or show the document
@@ -203,11 +209,12 @@ export function registerEditTools(server: McpServer): void {
         CRITICAL: originalCode parameter must match current file content exactly or tool fails.
         If tool fails: run read_file_code on target lines to get current content, then retry.
 
-        Parameters use 1-based line numbers. Always verify line numbers with read_file_code if unsure.`,
+        Parameters use 1-based line numbers. Use endLine=-1 to replace from startLine to end of file.
+        Always verify line numbers with read_file_code if unsure.`,
         {
             path: z.string().describe('The path to the file to modify'),
             startLine: z.number().describe('The start line number (1-based, inclusive)'),
-            endLine: z.number().describe('The end line number (1-based, inclusive)'),
+            endLine: z.number().describe('The end line number (1-based, inclusive). Use -1 to replace to end of file.'),
             content: z.string().describe('The new content to replace the lines with'),
             originalCode: z.string().describe('The original code for validation - must match exactly')
         },
@@ -216,7 +223,14 @@ export function registerEditTools(server: McpServer): void {
             
             // Convert 1-based input to 0-based for VS Code API
             const zeroBasedStartLine = startLine - 1;
-            const zeroBasedEndLine = endLine - 1;
+            // Handle endLine: -1 means end of file
+            let zeroBasedEndLine: number;
+            if (endLine === -1) {
+                // Will be resolved to actual line count after opening document
+                zeroBasedEndLine = -1;
+            } else {
+                zeroBasedEndLine = endLine - 1;
+            }
             
             try {
                 console.log('[replace_lines_code] Replacing lines');
