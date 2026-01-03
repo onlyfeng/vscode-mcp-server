@@ -8,3 +8,5 @@ plans
 CLAUDE.md
 .specstory/
 .cursorindexingignore
+.claude/
+AGENTS.md
