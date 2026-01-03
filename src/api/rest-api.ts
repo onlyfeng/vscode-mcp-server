@@ -177,23 +177,41 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
                     content = '';
                 } else {
                     // Handle startLine: undefined or -1 means beginning of file, otherwise convert 1-based to 0-based
-                    const start = (startLine === undefined || startLine === -1) ? 0 : Math.max(0, startLine - 1);
+                    const start = (startLine === undefined || startLine === -1) ? 0 : startLine - 1;
                     // Handle endLine: undefined or -1 means end of file, otherwise convert 1-based to 0-based
-                    const end = (endLine === undefined || endLine === -1) ? lineCount - 1 : Math.max(0, endLine - 1);
+                    const end = (endLine === undefined || endLine === -1) ? lineCount - 1 : endLine - 1;
                     
-                    // Validate range - ensure indices are within bounds
-                    const actualStart = Math.min(start, lineCount - 1);
-                    const actualEnd = Math.min(end, lineCount - 1);
+                    // Validate line numbers are within bounds (don't silently clamp)
+                    if (start < 0) {
+                        return res.status(400).json({
+                            error: `Invalid startLine ${startLine}. Line numbers must be >= 1 (or -1 for beginning of file)`
+                        });
+                    }
+                    if (start >= lineCount) {
+                        return res.status(400).json({
+                            error: `Invalid startLine ${startLine}. File only has ${lineCount} line(s). Valid range: 1 to ${lineCount}`
+                        });
+                    }
+                    if (end < 0) {
+                        return res.status(400).json({
+                            error: `Invalid endLine ${endLine}. Line numbers must be >= 1 (or -1 for end of file)`
+                        });
+                    }
+                    if (end >= lineCount) {
+                        return res.status(400).json({
+                            error: `Invalid endLine ${endLine}. File only has ${lineCount} line(s). Valid range: 1 to ${lineCount}`
+                        });
+                    }
                     
                     // Handle invalid range (start > end)
-                    if (actualStart > actualEnd) {
+                    if (start > end) {
                         return res.status(400).json({
                             error: `Invalid range: startLine (${startLine}) cannot be greater than endLine (${endLine})`
                         });
                     }
                     
                     const lines: string[] = [];
-                    for (let i = actualStart; i <= actualEnd; i++) {
+                    for (let i = start; i <= end; i++) {
                         lines.push(document.lineAt(i).text);
                     }
                     content = lines.join('\n');
