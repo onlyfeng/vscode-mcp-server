@@ -15,6 +15,13 @@ Example:
 """
 
 import sys
+import io
+
+# 设置 stdout 编码为 UTF-8，解决 Windows 控制台 GBK 编码问题
+if sys.stdout.encoding.lower() != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 import argparse
 
 try:
