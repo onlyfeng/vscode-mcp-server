@@ -1,13 +1,35 @@
 ---
 name: vscode-mcp
-description: VS Code MCP Server semantic analysis skill for AI coding agents. Provides symbol navigation, references, and refactoring capabilities via REST API. Recommended for Cursor/Claude Code - complements existing file/edit/shell tools with VS Code's language server features.
+description: "IDE Language Server (LSP) capabilities via REST API. Use this skill when: (1) 查找引用/在哪里被引用/被谁调用/find references - 查看变量、函数、类在哪里被使用; (2) 跳转定义/查看类型/go to definition - 查看符号的定义或类型; (3) 重命名/rename - 跨文件安全重命名符号; (4) quickfix/快速修复/Quick Fix/code actions - 先调用 list code actions 查看可用的修复建议，再调用 apply code action 执行修复; (5) 搜索符号/有哪些类/有哪些接口/有哪些方法 - 在工作区搜索类、接口、函数; (6) 文档大纲/列出函数/有哪些私有方法 - 获取文件中的符号结构。Cursor 内置工具不提供这些 LSP 语义分析能力。"
 ---
 
 # VS Code MCP Server Skill
 
-This skill provides **semantic code analysis** capabilities via VS Code's language server.
+This skill provides **semantic code analysis** capabilities via VS Code's language server (LSP).
 
-**For Cursor/Claude Code users**: Use `semantic-only.json` preset - this skill focuses on symbol analysis and refactoring, complementing Cursor's built-in file/edit/shell/diagnostics tools.
+## When to Use This Skill
+
+Use this skill for tasks that require **semantic understanding** of code:
+
+| Task | Trigger Scenarios | API |
+|------|-------------------|-----|
+| **Find References** | 用户问"这个变量在哪里被使用"；重构前检查影响范围；确认修改是否遗漏 | `/api/symbols/references` |
+| **Go to Definition** | 用户问"查看定义"；需要了解变量/函数的类型；跳转到实现 | `/api/symbols/definition` |
+| **Rename Symbol** | 用户要求重命名；重构变量/函数/类名；跨文件安全替换 | `/api/refactor/rename` |
+| **Code Actions / Quickfix** | 用户要求 quickfix/快速修复/Quick Fix；先 list 查看可用修复，再 apply 执行 | `/api/refactor/code-actions` → `/api/refactor/apply-action` |
+| **Search Symbols** | 用户搜索某个类/函数；了解代码结构 | `/api/symbols/workspace` |
+| **Document Outline** | 用户要求列出文件结构；快速了解模块组成 | `/api/symbols/document` |
+
+### Agent 自动化任务中的典型触发场景
+
+1. **Quickfix / Code Actions**：用户要求快速修复 → 先调用 list code actions 查看有哪些可用修复，再调用 apply 执行
+2. **安全重构**：修改函数签名前 → 使用 references API 找到所有调用点，确保不遗漏
+3. **批量重命名**：需要在多个文件中重命名变量 → 使用 rename API（比 grep + 手动替换更安全）
+4. **理解代码**：需要了解某个变量的类型或来源 → 使用 definition API
+
+> **Why this skill vs Cursor built-in tools?**
+> - Cursor's `grep` finds text matches, but can't understand semantic scope
+> - This skill uses VS Code's Language Server for **accurate symbol resolution** and **safe refactoring**
 
 ## Prerequisites
 
