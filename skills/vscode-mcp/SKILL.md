@@ -300,7 +300,18 @@ curl -s -X POST "http://127.0.0.1:3000/api/refactor/apply-action" \
 
 ### Rename Symbol
 
-**PowerShell（直接会话 - 推荐）**
+> **🎯 AI Agent 推荐方案**：使用 Python 脚本可完全避免 PowerShell 转义问题，跨平台兼容。
+
+**Python 脚本（强烈推荐 - 无转义问题，跨平台）**
+```bash
+# Preview rename
+python scripts/rename_symbol.py src/server.ts 25 MCPServer McpServer --preview
+
+# Apply rename
+python scripts/rename_symbol.py src/server.ts 25 MCPServer McpServer
+```
+
+**PowerShell（直接会话）**
 ```powershell
 # Preview rename (apply=$false)
 $body = @{ path = "src/server.ts"; line = 25; symbol = "MCPServer"; newName = "McpServer"; apply = $false } | ConvertTo-Json
@@ -309,6 +320,14 @@ Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/refactor/rename" -Method Post 
 # Apply rename (apply=$true)
 $body = @{ path = "src/server.ts"; line = 25; symbol = "MCPServer"; newName = "McpServer"; apply = $true } | ConvertTo-Json
 Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/refactor/rename" -Method Post -Body $body -ContentType "application/json" | ConvertTo-Json -Depth 3
+```
+
+**PowerShell 临时文件方式（避免 `powershell -Command` 转义问题）**
+```powershell
+# 使用临时文件避免命令行转义问题
+$json = '{"path":"src/server.ts","line":25,"symbol":"MCPServer","newName":"McpServer","apply":true}'
+$json | Out-File -FilePath "$env:TEMP\rename_body.json" -Encoding utf8 -NoNewline
+Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/refactor/rename" -Method Post -ContentType "application/json" -InFile "$env:TEMP\rename_body.json" | ConvertTo-Json -Depth 3
 ```
 
 **通过 powershell -Command 调用（注意 `$false / `$true 转义）**
@@ -423,7 +442,7 @@ Response shows enabled status for each endpoint:
 
 ## Python Scripts
 
-Helper scripts in `scripts/` directory:
+Helper scripts in `scripts/` directory - **推荐用于 AI Agent 调用，避免 PowerShell 转义问题**：
 
 ```bash
 pip install -r scripts/requirements.txt
@@ -433,7 +452,19 @@ python scripts/test_connection.py
 
 # Find references
 python scripts/find_references.py src/server.ts 25 MCPServer
+
+# Rename symbol (推荐方式 - 无转义问题)
+python scripts/rename_symbol.py src/server.ts 25 MCPServer McpServer
+python scripts/rename_symbol.py src/server.ts 25 MCPServer McpServer --preview
+
+# Get diagnostics
+python scripts/get_diagnostics.py src/server.ts
+
+# Code actions
+python scripts/code_actions.py src/server.ts --startLine 1 --endLine -1
 ```
+
+> **💡 Windows AI Agent 提示**：使用 Python 脚本可完全绕过 PowerShell 的 `$` 变量转义和 JSON 引号转义问题。
 
 ## MCP Tools (via MCP Protocol)
 

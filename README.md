@@ -333,7 +333,6 @@ In addition to the MCP protocol, the server also exposes a REST API at `/api` fo
 
 ### Example Usage
 
-**Linux/macOS (bash/curl):**
 ```bash
 # Health check
 curl http://127.0.0.1:3000/api/health
@@ -351,26 +350,6 @@ curl "http://127.0.0.1:3000/api/refactor/code-actions?path=src/main.ts&startLine
 curl -X POST http://127.0.0.1:3000/api/refactor/rename \
   -H "Content-Type: application/json" \
   -d '{"path":"src/main.ts","line":10,"symbol":"oldName","newName":"newName"}'
-```
-
-**Windows (PowerShell):**
-```powershell
-# Health check
-Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/health"
-
-# Get diagnostics for a file
-Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/diagnostics?path=src/main.ts"
-
-# Find references to a symbol
-Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/symbols/references?path=src/main.ts&line=10&symbol=myFunction"
-
-# Rename a symbol (use temp file to avoid escaping issues)
-$json = '{"path":"src/server.ts","line":33,"symbol":"toolConfig","newName":"_toolConfig","apply":true}'
-$json | Out-File -FilePath "$env:TEMP\body.json" -Encoding utf8 -NoNewline
-Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/refactor/rename" -Method Post -ContentType "application/json" -InFile "$env:TEMP\body.json"
-
-# Or use curl.exe on Windows (note: curl.exe, not curl alias)
-curl.exe -X POST "http://127.0.0.1:3000/api/refactor/rename" -H "Content-Type: application/json" -d "{\"path\":\"src/main.ts\",\"line\":10,\"symbol\":\"oldName\",\"newName\":\"newName\"}"
 ```
 
 ### OpenSkills Integration
