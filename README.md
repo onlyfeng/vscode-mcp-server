@@ -217,6 +217,7 @@ The extension creates an MCP server that:
   - Parameters:
     - `command`: The shell command to execute
     - `cwd` (optional): Optional working directory for the command (default: '.')
+    - `timeout` (optional): Command timeout in milliseconds (default: 10000)
 
   This tool is useful for:
   - Running CLI commands and build operations
@@ -323,9 +324,12 @@ In addition to the MCP protocol, the server also exposes a REST API at `/api` fo
 | `/api/files/read` | GET | Read file (params: `path`, `startLine`, `endLine`) |
 | `/api/diagnostics` | GET | Get diagnostics (params: `path`) |
 | `/api/symbols/document` | GET | Document symbols (params: `path`) |
-| `/api/symbols/workspace` | GET | Search symbols (params: `query`) |
+| `/api/symbols/workspace` | GET | Search symbols (params: `query`, `maxResults`) |
 | `/api/symbols/references` | GET | Find references (params: `path`, `line`, `character`/`symbol`) |
 | `/api/symbols/definition` | GET | Go to definition (params: `path`, `line`, `character`/`symbol`) |
+| `/api/refactor/code-actions` | GET | Get code actions (params: `path`, `startLine`, `endLine`) |
+| `/api/refactor/apply-action` | POST | Apply code action (body: `requestId`, `index`, `applyAll`) |
+| `/api/refactor/rename` | POST | Rename symbol (body: `path`, `line`, `character`/`symbol`, `newName`, `apply`) |
 
 ### Example Usage
 
@@ -338,6 +342,14 @@ curl "http://127.0.0.1:3000/api/diagnostics?path=src/main.ts"
 
 # Find references to a symbol
 curl "http://127.0.0.1:3000/api/symbols/references?path=src/main.ts&line=10&symbol=myFunction"
+
+# Get code actions for a file range
+curl "http://127.0.0.1:3000/api/refactor/code-actions?path=src/main.ts&startLine=1&endLine=-1"
+
+# Rename a symbol
+curl -X POST http://127.0.0.1:3000/api/refactor/rename \
+  -H "Content-Type: application/json" \
+  -d '{"path":"src/main.ts","line":10,"symbol":"oldName","newName":"newName"}'
 ```
 
 ### OpenSkills Integration
