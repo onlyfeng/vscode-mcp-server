@@ -445,7 +445,7 @@ const result = await renameSymbol('src/main.ts', 10, 'myFunction', 'newFunction'
 console.log(`Renamed in ${result.totalChanges} locations`);
 ```
 
-### PowerShell
+### PowerShell（直接会话 - 推荐）
 
 ```powershell
 $BASE_URL = "http://127.0.0.1:3000/api"
@@ -462,6 +462,26 @@ $refs.references | ConvertTo-Json
 $body = @{ path = "src/main.ts"; line = 10; symbol = "oldName"; newName = "newName" } | ConvertTo-Json
 Invoke-RestMethod -Uri "$BASE_URL/refactor/rename" -Method Post -Body $body -ContentType "application/json" | ConvertTo-Json -Depth 3
 ```
+
+### PowerShell（通过 powershell -Command 调用 - AI Agent 场景）
+
+```powershell
+# 注意：所有 $ 变量必须使用 `$ 转义
+
+# Check health
+powershell -Command "Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/health' | ConvertTo-Json"
+
+# Find references
+powershell -Command "`$refs = Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/symbols/references?path=src/main.ts&line=10&symbol=MCPServer'; Write-Host 'Found' `$refs.count 'references'; `$refs.references | ConvertTo-Json"
+
+# Rename symbol（注意 apply 使用 `$true）
+powershell -Command "`$body = @{ path = 'src/main.ts'; line = 10; symbol = 'oldName'; newName = 'newName'; apply = `$true } | ConvertTo-Json; Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/refactor/rename' -Method Post -Body `$body -ContentType 'application/json' | ConvertTo-Json -Depth 3"
+```
+
+> **⚠️ Windows curl.exe 注意事项**：
+> - 在 PowerShell 中使用 curl.exe 传递 JSON 需要复杂的引号转义
+> - `curl -d @file.json` 语法在 PowerShell 中不可用（`@` 被解释为展开运算符）
+> - **强烈推荐使用 Invoke-RestMethod**，避免所有转义问题
 
 ---
 
