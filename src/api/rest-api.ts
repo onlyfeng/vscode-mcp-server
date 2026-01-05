@@ -457,18 +457,21 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
     /**
      * POST /api/refactor/apply-action
      * Apply a code action from cache
-     * Body: { requestId, index, applyAll? }
+     * Body: { requestId, index?, applyAll?, applyPreferred? }
+     * Priority: index > applyPreferred > applyAll
      */
     router.post('/refactor/apply-action', refactorMiddleware, async (req: Request, res: Response) => {
         try {
-            const { requestId, index, applyAll = false } = req.body;
+            const { requestId, index, applyAll = false, applyPreferred = false } = req.body;
 
             if (!requestId) {
                 return res.status(400).json({ error: 'requestId is required' });
             }
 
-            if (!applyAll && (index === undefined || index === null)) {
-                return res.status(400).json({ error: 'index is required when applyAll is false' });
+            // Priority: index > applyPreferred > applyAll
+            // index is required only when both applyAll and applyPreferred are false
+            if (!applyAll && !applyPreferred && (index === undefined || index === null)) {
+                return res.status(400).json({ error: 'index is required when applyAll and applyPreferred are both false' });
             }
 
             const cached = getCachedActions(requestId);
@@ -479,13 +482,9 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
             let appliedCount = 0;
             const results: string[] = [];
 
-            if (applyAll) {
-                // Use shared service for applyAll - re-fetches after each action
-                const applyResult = await applyAllQuickfixes(cached.uri, cached.range);
-                appliedCount = applyResult.appliedCount;
-                results.push(...applyResult.results);
-            } else {
-                // Apply single action
+            // Priority: index > applyPreferred > applyAll
+            if (index !== undefined && index !== null) {
+                // Apply single action by index (highest priority)
                 if (cached.actions.length === 0) {
                     return res.status(400).json({ error: 'No actions available to apply' });
                 }
@@ -493,7 +492,6 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
                     return res.status(400).json({ error: `Invalid index ${index}. Valid range: 0 to ${cached.actions.length - 1}` });
                 }
 
-                // Use shared service for single action
                 const action = cached.actions[index];
                 const actionResult = await applySingleCodeAction(action, cached.uri, cached.range);
                 const resultMessage = actionResult.message?.trim();
@@ -503,7 +501,18 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
                 } else {
                     results.push(resultMessage ? `Failed to apply: ${action.title}\n${resultMessage}` : `Failed to apply: ${action.title}`);
                 }
+            } else if (applyPreferred) {
+                // Use shared service for applyPreferred - only preferred (*) quickfix actions
+                const applyResult = await applyAllQuickfixes(cached.uri, cached.range, 50, true);
+                appliedCount = applyResult.appliedCount;
+                results.push(...applyResult.results);
+            } else if (applyAll) {
+                // Use shared service for applyAll - re-fetches after each action
+                const applyResult = await applyAllQuickfixes(cached.uri, cached.range);
+                appliedCount = applyResult.appliedCount;
+                results.push(...applyResult.results);
             }
+            // Note: else case is unreachable due to validation above (index required when applyAll and applyPreferred are both false)
 
             // Invalidate cache
             removeCachedActions(requestId);
@@ -596,7 +605,7 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
             { method: 'GET', path: '/api/symbols/references', description: 'Find references', params: ['path', 'line', 'character|symbol'], enabled: config.symbol },
             { method: 'GET', path: '/api/symbols/definition', description: 'Get definition', params: ['path', 'line', 'character|symbol'], enabled: config.symbol },
             { method: 'GET', path: '/api/refactor/code-actions', description: 'Get code actions', params: ['path', 'startLine', 'endLine?'], enabled: config.refactor },
-            { method: 'POST', path: '/api/refactor/apply-action', description: 'Apply code action', body: ['requestId', 'index', 'applyAll?'], enabled: config.refactor },
+            { method: 'POST', path: '/api/refactor/apply-action', description: 'Apply code action', body: ['requestId', 'index?', 'applyAll?', 'applyPreferred?'], enabled: config.refactor },
             { method: 'POST', path: '/api/refactor/rename', description: 'Rename symbol', body: ['path', 'line', 'character|symbol', 'newName', 'apply?'], enabled: config.refactor }
         ];
 

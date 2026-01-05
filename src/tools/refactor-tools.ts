@@ -499,14 +499,18 @@ export function registerRefactorTools(server: McpServer): void {
         WHEN TO USE: After listing code actions, to apply a specific fix or refactoring.
         
         Requires the requestId from list_code_actions_code (valid for 60 seconds) and the action index.
-        Use applyAll=true to apply all quickfix actions in sequence (useful for fixing multiple similar issues).`,
+        Use applyAll=true to apply all quickfix actions in sequence (useful for fixing multiple similar issues).
+        Use applyPreferred=true to apply only preferred (*) quickfix actions.
+        
+        Priority: index > applyPreferred > applyAll`,
         {
             requestId: z.string().describe('The request ID from list_code_actions_code'),
-            index: z.number().optional().describe('The index of the action to apply (from the list). Required when applyAll=false, ignored when applyAll=true.'),
-            applyAll: z.boolean().optional().default(false).describe('Apply all quickfix actions in sequence (default: false). When true, ignores index parameter.')
+            index: z.number().optional().describe('The index of the action to apply (from the list). Required when applyAll and applyPreferred are both false.'),
+            applyAll: z.boolean().optional().default(false).describe('Apply all quickfix actions in sequence (default: false). When true, ignores index parameter.'),
+            applyPreferred: z.boolean().optional().default(false).describe('Apply only preferred (*) quickfix actions (default: false). Takes priority over applyAll.')
         },
-        async ({ requestId, index, applyAll = false }): Promise<CallToolResult> => {
-            logger.info(`[apply_code_action_code] Tool called with requestId="${requestId}", index=${index}, applyAll=${applyAll}`);
+        async ({ requestId, index, applyAll = false, applyPreferred = false }): Promise<CallToolResult> => {
+            logger.info(`[apply_code_action_code] Tool called with requestId="${requestId}", index=${index}, applyAll=${applyAll}, applyPreferred=${applyPreferred}`);
             
             // Cleanup expired cache entries
             cleanupExpiredCache();
@@ -727,8 +731,8 @@ export function registerRefactorTools(server: McpServer): void {
                     return { applied: actionApplied, message: actionMessage };
                 };
                 
-                if (applyAll) {
-                    // applyAll mode: Apply quickfix actions one by one, re-fetching after each
+                if (applyPreferred || applyAll) {
+                    // applyAll/applyPreferred mode: Apply quickfix actions one by one, re-fetching after each
                     // This is necessary because applying one action changes the file content,
                     // which invalidates the position information of subsequent cached actions
                     const MAX_ITERATIONS = 50; // Safety limit to prevent infinite loops
@@ -739,18 +743,24 @@ export function registerRefactorTools(server: McpServer): void {
                     const originalRange = cached.range;
                     
                     // Get initial count of quickfix actions, excluding dangerous ones
-                    // Only filter by quickfix kind, not isPreferred (which could include non-quickfix actions)
+                    // When applyPreferred is true, only include preferred actions
                     const allQuickfixes = cached.actions.filter(a =>
-                        a.kind?.value?.startsWith('quickfix')
+                        a.kind?.value?.startsWith('quickfix') &&
+                        (!applyPreferred || a.isPreferred === true)
                     );
                     const dangerousCount = allQuickfixes.filter(a => isDangerousQuickfix(a)).length;
                     const safeQuickfixes = allQuickfixes.filter(a => !isDangerousQuickfix(a));
                     
+                    const modeLabel = applyPreferred ? 'applyPreferred' : 'applyAll';
                     if (safeQuickfixes.length === 0) {
-                        let message = `No safe quickfix actions found to apply.`;
+                        let message = applyPreferred 
+                            ? `No preferred (*) quickfix actions found to apply.`
+                            : `No safe quickfix actions found to apply.`;
                         if (dangerousCount > 0) {
                             message += ` ${dangerousCount} potentially dangerous action(s) were filtered out (e.g., "Remove unused declaration" which might delete useful code like logging statements).`;
                             message += ` Use specific index to apply them individually if needed.`;
+                        } else if (applyPreferred) {
+                            message += ` Available actions may not be marked as preferred, try applyAll=true instead.`;
                         } else {
                             message += ` Available actions may be refactoring suggestions only.`;
                         }
@@ -763,8 +773,9 @@ export function registerRefactorTools(server: McpServer): void {
                         };
                     }
                     
-                    logger.info(`[apply_code_action_code] applyAll mode: found ${safeQuickfixes.length} safe quickfix actions (${dangerousCount} dangerous filtered out)`);
-                    resultMessage = `Applying quickfix actions (found ${safeQuickfixes.length} safe, ${dangerousCount} filtered as potentially dangerous):\n\n`;
+                    logger.info(`[apply_code_action_code] ${modeLabel} mode: found ${safeQuickfixes.length} safe quickfix actions (${dangerousCount} dangerous filtered out)`);
+                    const modeDescription = applyPreferred ? 'preferred (*)' : 'all';
+                    resultMessage = `Applying ${modeDescription} quickfix actions (found ${safeQuickfixes.length} safe, ${dangerousCount} filtered as potentially dangerous):\n\n`;
                     
                     // Track document content to detect changes
                     // NOTE: We don't use action titles for deduplication because multiple actions
@@ -815,9 +826,11 @@ export function registerRefactorTools(server: McpServer): void {
                         
                         // Filter to quickfix actions only, excluding dangerous ones
                         // NOTE: We filter by kind only, NOT by title, to allow multiple actions with same title
+                        // When applyPreferred is true, only include preferred actions
                         const quickfixActions = freshActions.filter(a =>
                             a.kind?.value?.startsWith('quickfix') &&
-                            !isDangerousQuickfix(a)
+                            !isDangerousQuickfix(a) &&
+                            (!applyPreferred || a.isPreferred === true)
                         );
                         
                         if (quickfixActions.length === 0) {
@@ -852,7 +865,7 @@ export function registerRefactorTools(server: McpServer): void {
                         return {
                             content: [{
                                 type: 'text',
-                                text: `index is required when applyAll is false`
+                                text: `index is required when applyAll and applyPreferred are both false`
                             }],
                             isError: true
                         };
@@ -890,7 +903,7 @@ export function registerRefactorTools(server: McpServer): void {
                 await saveDocument(cached.uri);
                 
                 if (totalApplied > 0) {
-                    if (applyAll) {
+                    if (applyPreferred || applyAll) {
                         resultMessage += `\n✓ Successfully applied ${totalApplied} action(s).`;
                         resultMessage += `\n✓ All affected files have been saved to disk.`;
                         resultMessage += `\n✓ Cache has been invalidated for affected files.`;

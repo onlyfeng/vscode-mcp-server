@@ -365,13 +365,15 @@ export function isDangerousQuickfix(action: vscode.CodeAction): boolean {
  * @param targetUri The target file URI
  * @param originalRange The original range to scan
  * @param maxIterations Maximum number of iterations (safety limit)
+ * @param onlyPreferred When true, only apply actions marked as isPreferred (default: false)
  */
 export async function applyAllQuickfixes(
     targetUri: vscode.Uri,
     originalRange: vscode.Range,
-    maxIterations: number = 50
+    maxIterations: number = 50,
+    onlyPreferred: boolean = false
 ): Promise<{ appliedCount: number; results: string[]; reachedLimit: boolean }> {
-    logger.info(`[applyAllQuickfixes] Starting for ${targetUri.fsPath}`);
+    logger.info(`[applyAllQuickfixes] Starting for ${targetUri.fsPath}, onlyPreferred=${onlyPreferred}`);
     
     let appliedCount = 0;
     const results: string[] = [];
@@ -410,10 +412,12 @@ export async function applyAllQuickfixes(
         ) || [];
         
         // Filter to quickfix actions only, excluding dangerous ones and previously failed ones
+        // When onlyPreferred is true, only include actions marked as isPreferred
         const quickfixActions = freshActions.filter(a =>
             a.kind?.value?.startsWith('quickfix') &&
             !isDangerousQuickfix(a) &&
-            !failedActionTitles.has(a.title)
+            !failedActionTitles.has(a.title) &&
+            (!onlyPreferred || a.isPreferred === true)
         );
         
         if (quickfixActions.length === 0) {
