@@ -460,8 +460,14 @@ python scripts/rename_symbol.py src/server.ts 25 MCPServer McpServer --preview
 # Get diagnostics
 python scripts/get_diagnostics.py src/server.ts
 
-# Code actions
+# Code actions - list available actions
 python scripts/code_actions.py src/server.ts --startLine 1 --endLine -1
+
+# Code actions - apply specific action by index
+python scripts/code_actions.py src/server.ts --apply ca_1234567890_abc123 0
+
+# Code actions - apply all quickfix actions
+python scripts/code_actions.py src/server.ts --apply-all ca_1234567890_abc123
 ```
 
 > **💡 Windows AI Agent 提示**：使用 Python 脚本可完全绕过 PowerShell 的 `$` 变量转义和 JSON 引号转义问题。
