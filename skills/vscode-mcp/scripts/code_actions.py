@@ -6,12 +6,14 @@ Usage:
     python code_actions.py <path> [--startLine N] [--endLine N] [--port PORT]
     python code_actions.py <path> --apply <requestId> <index>
     python code_actions.py <path> --apply-all <requestId>
+    python code_actions.py <path> --apply-preferred <requestId>
     
 Example:
     python code_actions.py src/server.ts
     python code_actions.py src/server.ts --startLine 1 --endLine -1
     python code_actions.py src/server.ts --apply ca_123_abc 0
     python code_actions.py src/server.ts --apply-all ca_123_abc
+    python code_actions.py src/server.ts --apply-preferred ca_123_abc  # 只应用 ⭐ 标记的
 """
 
 import sys
@@ -53,18 +55,27 @@ def get_code_actions(path: str, start_line: int = 1, end_line: int = -1, port: i
         sys.exit(1)
 
 
-def apply_code_action(request_id: str, index: int = None, apply_all: bool = False, port: int = 3000) -> dict:
-    """Apply a code action."""
+def apply_code_action(request_id: str, index: int = None, apply_all: bool = False, 
+                      apply_preferred: bool = False, port: int = 3000) -> dict:
+    """Apply a code action.
+    
+    Priority: index > applyPreferred > applyAll
+    """
     base_url = f"http://127.0.0.1:{port}/api"
     
     body = {"requestId": request_id}
-    if apply_all:
+    if index is not None:
+        # Highest priority: specific index
+        body["index"] = index
+    elif apply_preferred:
+        # Second priority: only preferred (*) actions
+        body["applyPreferred"] = True
+    elif apply_all:
+        # Lowest priority: all quickfix actions
         body["applyAll"] = True
     else:
-        if index is None:
-            print("Error: index is required when apply_all is False")
-            sys.exit(1)
-        body["index"] = index
+        print("Error: index is required when apply_all/apply_preferred is False")
+        sys.exit(1)
     
     try:
         response = requests.post(
@@ -113,6 +124,7 @@ def format_actions(data: dict) -> None:
     
     print("\n" + "-" * 60)
     print(f"To apply: python code_actions.py <path> --apply {data.get('requestId')} <index>")
+    print(f"To apply ⭐ only: python code_actions.py <path> --apply-preferred {data.get('requestId')}")
     print(f"To apply all: python code_actions.py <path> --apply-all {data.get('requestId')}")
 
 
@@ -139,11 +151,15 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=3000, help="Server port")
     parser.add_argument("--apply", nargs=2, metavar=('REQUEST_ID', 'INDEX'), help="Apply action by request ID and index")
     parser.add_argument("--apply-all", metavar='REQUEST_ID', help="Apply all quickfix actions")
+    parser.add_argument("--apply-preferred", metavar='REQUEST_ID', help="Apply only preferred (⭐) quickfix actions")
     args = parser.parse_args()
     
     if args.apply:
         request_id, index = args.apply
         data = apply_code_action(request_id, int(index), port=args.port)
+        format_apply_result(data)
+    elif args.apply_preferred:
+        data = apply_code_action(args.apply_preferred, apply_preferred=True, port=args.port)
         format_apply_result(data)
     elif args.apply_all:
         data = apply_code_action(args.apply_all, apply_all=True, port=args.port)

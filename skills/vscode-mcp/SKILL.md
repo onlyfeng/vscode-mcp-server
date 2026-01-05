@@ -143,7 +143,7 @@ curl.exe -s -X POST "http://127.0.0.1:3000/api/refactor/apply-action" -H "Conten
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/refactor/code-actions?path=...&startLine=1&endLine=-1` | List available code actions |
-| POST | `/api/refactor/apply-action` | Apply a code action |
+| POST | `/api/refactor/apply-action` | Apply a code action (body: requestId, index?/applyPreferred?/applyAll?) |
 | POST | `/api/refactor/rename` | Rename symbol across workspace |
 
 ## Usage Examples
@@ -215,10 +215,16 @@ Response:
 
 ### Apply Code Action
 
+**优先级规则**: `index` > `applyPreferred` > `applyAll`
+
 **PowerShell（直接会话 - 推荐）**
 ```powershell
-# Apply specific action by index
+# Apply specific action by index（最高优先级）
 $body = @{ requestId = "ca_1234567890_abc123"; index = 0 } | ConvertTo-Json
+Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/refactor/apply-action" -Method Post -Body $body -ContentType "application/json" | ConvertTo-Json -Depth 5
+
+# Apply only preferred (⭐) quickfix actions（推荐 - 只应用 VS Code 推荐的修复）
+$body = @{ requestId = "ca_1234567890_abc123"; applyPreferred = $true } | ConvertTo-Json
 Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/refactor/apply-action" -Method Post -Body $body -ContentType "application/json" | ConvertTo-Json -Depth 5
 
 # Apply all quickfix actions at once
@@ -231,6 +237,9 @@ Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/refactor/apply-action" -Method
 # Apply specific action by index
 powershell -Command "`$body = @{ requestId = 'ca_1234567890_abc123'; index = 0 } | ConvertTo-Json; Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/refactor/apply-action' -Method Post -Body `$body -ContentType 'application/json' | ConvertTo-Json -Depth 5"
 
+# Apply only preferred (⭐) quickfix actions（推荐）
+powershell -Command "`$body = @{ requestId = 'ca_1234567890_abc123'; applyPreferred = `$true } | ConvertTo-Json; Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/refactor/apply-action' -Method Post -Body `$body -ContentType 'application/json' | ConvertTo-Json -Depth 5"
+
 # Apply all quickfix actions at once（注意 `$true 转义）
 powershell -Command "`$body = @{ requestId = 'ca_1234567890_abc123'; applyAll = `$true } | ConvertTo-Json; Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/refactor/apply-action' -Method Post -Body `$body -ContentType 'application/json' | ConvertTo-Json -Depth 5"
 ```
@@ -241,6 +250,11 @@ powershell -Command "`$body = @{ requestId = 'ca_1234567890_abc123'; applyAll = 
 curl -s -X POST "http://127.0.0.1:3000/api/refactor/apply-action" \
   -H "Content-Type: application/json" \
   -d '{"requestId":"ca_1234567890_abc123","index":0}'
+
+# Apply only preferred (⭐) quickfix actions（推荐）
+curl -s -X POST "http://127.0.0.1:3000/api/refactor/apply-action" \
+  -H "Content-Type: application/json" \
+  -d '{"requestId":"ca_1234567890_abc123","applyPreferred":true}'
 
 # Apply all quickfix actions
 curl -s -X POST "http://127.0.0.1:3000/api/refactor/apply-action" \
@@ -260,12 +274,14 @@ curl -s -X POST "http://127.0.0.1:3000/api/refactor/apply-action" \
 
 ### Batch Fix (Fix All & Quickfix Sweep)
 
-- Set `applyAll=true` with `apply_code_action_code` or the REST `/api/refactor/apply-action` endpoint to run the same sequential quickfix sweep that the MCP tools expose (great for multiple "Prefix 'req' with an underscore" items).
+- **`applyPreferred=true`**（推荐）: 只应用标记为 preferred (⭐) 的 quickfix actions。这些是 VS Code/TypeScript 推荐的安全修复，如移除未使用的 import、参数加下划线前缀等。
+- **`applyAll=true`**: 应用所有 quickfix actions（不包括可能危险的 "Remove unused declaration" 等）。
+- **优先级**: `index` > `applyPreferred` > `applyAll`
 - When a provider exposes a `source.fixAll` / `refactor.fixAll` action such as "Prefix all unused declarations" but fails to return edits, the REST layer automatically falls back to this quickfix sweep so you still get a complete batch fix.
 - Recommended flow:
   1. Call `list_code_actions_code` or `/api/refactor/code-actions?startLine=1&endLine=-1` to obtain a `requestId`;
-  2. Apply the desired `source.fixAll` action (single index). If it produces no changes, the server transparently runs the quickfix sweep and surfaces detailed logs;
-  3. Alternatively, call `/api/refactor/apply-action` with `applyAll=true` directly to trigger the sweep explicitly.
+  2. Apply with `applyPreferred=true` to fix only recommended issues;
+  3. Or use `applyAll=true` if you want to apply all safe quickfix actions.
 
 **PowerShell（直接会话 - 推荐）**
 ```powershell
@@ -273,7 +289,11 @@ curl -s -X POST "http://127.0.0.1:3000/api/refactor/apply-action" \
 $list = Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/refactor/code-actions?path=src/server.ts&startLine=1&endLine=-1"
 $list | ConvertTo-Json -Depth 3
 
-# Step 2: Apply all quickfix actions（使用返回的 requestId）
+# Step 2a: Apply only preferred (⭐) quickfix actions（推荐）
+$body = @{ requestId = $list.requestId; applyPreferred = $true } | ConvertTo-Json
+Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/refactor/apply-action" -Method Post -Body $body -ContentType "application/json" | ConvertTo-Json -Depth 5
+
+# Step 2b: Or apply all quickfix actions
 $body = @{ requestId = $list.requestId; applyAll = $true } | ConvertTo-Json
 Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/refactor/apply-action" -Method Post -Body $body -ContentType "application/json" | ConvertTo-Json -Depth 5
 ```
@@ -283,7 +303,10 @@ Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/refactor/apply-action" -Method
 # Step 1: Get code actions（记录返回的 requestId）
 powershell -Command "Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/refactor/code-actions?path=src/server.ts&startLine=1&endLine=-1' | ConvertTo-Json -Depth 3"
 
-# Step 2: Apply all quickfix actions（手动替换 requestId 为上一步返回的值）
+# Step 2a: Apply only preferred (⭐) quickfix actions（推荐）
+powershell -Command "`$body = @{ requestId = 'ca_xxxxxxxxx_xxxxxx'; applyPreferred = `$true } | ConvertTo-Json; Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/refactor/apply-action' -Method Post -Body `$body -ContentType 'application/json' | ConvertTo-Json -Depth 5"
+
+# Step 2b: Or apply all quickfix actions
 powershell -Command "`$body = @{ requestId = 'ca_xxxxxxxxx_xxxxxx'; applyAll = `$true } | ConvertTo-Json; Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/refactor/apply-action' -Method Post -Body `$body -ContentType 'application/json' | ConvertTo-Json -Depth 5"
 ```
 
@@ -292,7 +315,12 @@ powershell -Command "`$body = @{ requestId = 'ca_xxxxxxxxx_xxxxxx'; applyAll = `
 # Step 1: Get code actions and note the requestId
 curl -s "http://127.0.0.1:3000/api/refactor/code-actions?path=src/server.ts&startLine=1&endLine=-1"
 
-# Step 2: Apply all quickfix actions
+# Step 2a: Apply only preferred (⭐) quickfix actions（推荐）
+curl -s -X POST "http://127.0.0.1:3000/api/refactor/apply-action" \
+  -H "Content-Type: application/json" \
+  -d '{"requestId":"ca_xxxxxxxxx_xxxxxx","applyPreferred":true}'
+
+# Step 2b: Or apply all quickfix actions
 curl -s -X POST "http://127.0.0.1:3000/api/refactor/apply-action" \
   -H "Content-Type: application/json" \
   -d '{"requestId":"ca_xxxxxxxxx_xxxxxx","applyAll":true}'
@@ -465,6 +493,9 @@ python scripts/code_actions.py src/server.ts --startLine 1 --endLine -1
 
 # Code actions - apply specific action by index
 python scripts/code_actions.py src/server.ts --apply ca_1234567890_abc123 0
+
+# Code actions - apply only preferred (⭐) quickfix actions
+python scripts/code_actions.py src/server.ts --apply-preferred ca_1234567890_abc123
 
 # Code actions - apply all quickfix actions
 python scripts/code_actions.py src/server.ts --apply-all ca_1234567890_abc123
