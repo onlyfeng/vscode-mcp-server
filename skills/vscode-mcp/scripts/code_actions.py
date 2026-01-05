@@ -18,7 +18,8 @@ import sys
 import io
 
 # 设置 stdout 编码为 UTF-8，解决 Windows 控制台 GBK 编码问题
-if sys.stdout.encoding.lower() != 'utf-8':
+encoding = sys.stdout.encoding
+if encoding is None or encoding.lower() != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
@@ -60,6 +61,9 @@ def apply_code_action(request_id: str, index: int = None, apply_all: bool = Fals
     if apply_all:
         body["applyAll"] = True
     else:
+        if index is None:
+            print("Error: index is required when apply_all is False")
+            sys.exit(1)
         body["index"] = index
     
     try:
