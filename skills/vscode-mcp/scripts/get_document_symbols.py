@@ -50,43 +50,34 @@ def get_document_symbols(path: str, port: int = 3000) -> dict:
         sys.exit(1)
 
 
-# Symbol kind mapping (from VS Code SymbolKind enum)
+# Symbol kind icons mapping (服务端返回字符串类型的 kind)
 SYMBOL_KIND_ICONS = {
-    1: "📄",   # File
-    2: "📦",   # Module
-    3: "🔷",   # Namespace
-    4: "📦",   # Package
-    5: "🔶",   # Class
-    6: "🔸",   # Method
-    7: "🏷️",   # Property
-    8: "📌",   # Field
-    9: "🔧",   # Constructor
-    10: "📋",  # Enum
-    11: "🔗",  # Interface
-    12: "⚡",  # Function
-    13: "📊",  # Variable
-    14: "🔢",  # Constant
-    15: "📝",  # String
-    16: "🔢",  # Number
-    17: "✅",  # Boolean
-    18: "📚",  # Array
-    19: "🗂️",  # Object
-    20: "🔑",  # Key
-    21: "❌",  # Null
-    22: "🔤",  # EnumMember
-    23: "📐",  # Struct
-    24: "📅",  # Event
-    25: "⚙️",  # Operator
-    26: "🧬",  # TypeParameter
-}
-
-SYMBOL_KIND_NAMES = {
-    1: "File", 2: "Module", 3: "Namespace", 4: "Package", 5: "Class",
-    6: "Method", 7: "Property", 8: "Field", 9: "Constructor", 10: "Enum",
-    11: "Interface", 12: "Function", 13: "Variable", 14: "Constant", 15: "String",
-    16: "Number", 17: "Boolean", 18: "Array", 19: "Object", 20: "Key",
-    21: "Null", 22: "EnumMember", 23: "Struct", 24: "Event", 25: "Operator",
-    26: "TypeParameter"
+    "File": "📄",
+    "Module": "📦",
+    "Namespace": "🔷",
+    "Package": "📦",
+    "Class": "🔶",
+    "Method": "🔸",
+    "Property": "🏷️",
+    "Field": "📌",
+    "Constructor": "🔧",
+    "Enum": "📋",
+    "Interface": "🔗",
+    "Function": "⚡",
+    "Variable": "📊",
+    "Constant": "🔢",
+    "String": "📝",
+    "Number": "🔢",
+    "Boolean": "✅",
+    "Array": "📚",
+    "Object": "🗂️",
+    "Key": "🔑",
+    "Null": "❌",
+    "EnumMember": "🔤",
+    "Struct": "📐",
+    "Event": "📅",
+    "Operator": "⚙️",
+    "TypeParameter": "🧬",
 }
 
 
@@ -96,15 +87,14 @@ def format_symbol(symbol: dict, indent: int = 0) -> list:
     prefix = "  " * indent
     
     name = symbol.get('name', 'unknown')
-    kind = symbol.get('kind', 0)
+    kind = symbol.get('kind', 'Unknown')  # 服务端返回字符串类型
     icon = SYMBOL_KIND_ICONS.get(kind, "•")
-    kind_name = SYMBOL_KIND_NAMES.get(kind, "Unknown")
     
     # Get location
     start = symbol.get('range', {}).get('start', {})
     line = start.get('line', '?')
     
-    lines.append(f"{prefix}{icon} {name} ({kind_name}) - Line {line}")
+    lines.append(f"{prefix}{icon} {name} ({kind}) - Line {line}")
     
     # Process children
     children = symbol.get('children', [])

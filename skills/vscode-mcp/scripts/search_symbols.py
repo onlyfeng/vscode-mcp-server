@@ -53,43 +53,34 @@ def search_symbols(query: str, max_results: int = 10, port: int = 3000) -> dict:
         sys.exit(1)
 
 
-# Symbol kind mapping (from VS Code SymbolKind enum)
+# Symbol kind icons mapping (服务端返回字符串类型的 kind)
 SYMBOL_KIND_ICONS = {
-    1: "📄",   # File
-    2: "📦",   # Module
-    3: "🔷",   # Namespace
-    4: "📦",   # Package
-    5: "🔶",   # Class
-    6: "🔸",   # Method
-    7: "🏷️",   # Property
-    8: "📌",   # Field
-    9: "🔧",   # Constructor
-    10: "📋",  # Enum
-    11: "🔗",  # Interface
-    12: "⚡",  # Function
-    13: "📊",  # Variable
-    14: "🔢",  # Constant
-    15: "📝",  # String
-    16: "🔢",  # Number
-    17: "✅",  # Boolean
-    18: "📚",  # Array
-    19: "🗂️",  # Object
-    20: "🔑",  # Key
-    21: "❌",  # Null
-    22: "🔤",  # EnumMember
-    23: "📐",  # Struct
-    24: "📅",  # Event
-    25: "⚙️",  # Operator
-    26: "🧬",  # TypeParameter
-}
-
-SYMBOL_KIND_NAMES = {
-    1: "File", 2: "Module", 3: "Namespace", 4: "Package", 5: "Class",
-    6: "Method", 7: "Property", 8: "Field", 9: "Constructor", 10: "Enum",
-    11: "Interface", 12: "Function", 13: "Variable", 14: "Constant", 15: "String",
-    16: "Number", 17: "Boolean", 18: "Array", 19: "Object", 20: "Key",
-    21: "Null", 22: "EnumMember", 23: "Struct", 24: "Event", 25: "Operator",
-    26: "TypeParameter"
+    "File": "📄",
+    "Module": "📦",
+    "Namespace": "🔷",
+    "Package": "📦",
+    "Class": "🔶",
+    "Method": "🔸",
+    "Property": "🏷️",
+    "Field": "📌",
+    "Constructor": "🔧",
+    "Enum": "📋",
+    "Interface": "🔗",
+    "Function": "⚡",
+    "Variable": "📊",
+    "Constant": "🔢",
+    "String": "📝",
+    "Number": "🔢",
+    "Boolean": "✅",
+    "Array": "📚",
+    "Object": "🗂️",
+    "Key": "🔑",
+    "Null": "❌",
+    "EnumMember": "🔤",
+    "Struct": "📐",
+    "Event": "📅",
+    "Operator": "⚙️",
+    "TypeParameter": "🧬",
 }
 
 
@@ -122,16 +113,15 @@ def format_symbols(data: dict, query: str) -> None:
         print(f"\n📁 {file_path}")
         for symbol in file_symbols:
             name = symbol.get('name', 'unknown')
-            kind = symbol.get('kind', 0)
+            kind = symbol.get('kind', 'Unknown')  # 服务端返回字符串类型
             icon = SYMBOL_KIND_ICONS.get(kind, "•")
-            kind_name = SYMBOL_KIND_NAMES.get(kind, "Unknown")
             line = symbol.get('line', '?')
             container = symbol.get('containerName', '')
             
             if container:
-                print(f"   {icon} {name} ({kind_name}) in {container} - Line {line}")
+                print(f"   {icon} {name} ({kind}) in {container} - Line {line}")
             else:
-                print(f"   {icon} {name} ({kind_name}) - Line {line}")
+                print(f"   {icon} {name} ({kind}) - Line {line}")
 
 
 if __name__ == "__main__":

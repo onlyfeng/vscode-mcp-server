@@ -68,12 +68,11 @@ def format_definitions(data: dict, symbol: str) -> None:
     
     for i, defn in enumerate(definitions, 1):
         file_path = defn.get('file', 'unknown')
-        start = defn.get('range', {}).get('start', {})
-        end = defn.get('range', {}).get('end', {})
-        start_line = start.get('line', '?')
-        start_char = start.get('character', '?')
-        end_line = end.get('line', '?')
-        end_char = end.get('character', '?')
+        # 使用扁平格式（与服务端返回格式一致）
+        start_line = defn.get('line', '?')
+        start_char = defn.get('character', '?')
+        end_line = defn.get('endLine', '?')
+        end_char = defn.get('endCharacter', '?')
         
         print(f"\n[{i}] 📁 {file_path}")
         print(f"    Location: Line {start_line}:{start_char} - {end_line}:{end_char}")
