@@ -110,6 +110,9 @@ export function createRestApiRouter(toolConfig?: ToolConfiguration): Router {
 
             res.json({
                 content: result.data!.content,
+                // Preferred: explicit range of lines returned (1-based, inclusive)
+                linesRead: result.data!.linesRead,
+                // Backward compatibility: historically exposed as "lineCount" but actually meant "end line"
                 lineCount: result.data!.linesRead ? result.data!.linesRead.end : undefined,
                 path
             });
