@@ -75,6 +75,101 @@ const SAFE_REMOVAL_KEYWORDS = [
     'type'
 ];
 
+// Built-in TypeScript/JavaScript language server command prefixes
+// These are the only commands we trust for automatic batch application
+const TRUSTED_COMMAND_PREFIXES = [
+    '_typescript.',
+    '_javascript.',
+    'editor.',
+    'eslint.',
+    'tsserver.'
+];
+
+// Commands that should be excluded from batch operations even if they match trusted prefixes
+// These commands may trigger AI dialogs or other interactive/non-deterministic behavior
+const EXCLUDED_COMMANDS = [
+    'editor.action.inlineDiffs.submitFix',  // Cursor "Fix with AI"
+    'editor.action.inlineDiffs.',           // Other Cursor inline AI commands
+];
+
+// Title keywords that indicate AI-powered or interactive actions
+// These actions should be excluded regardless of whether they have workspace edits
+const AI_ACTION_TITLE_KEYWORDS = [
+    'cline',
+    'copilot',
+    'cursor',
+    'fix with ai',
+    'ai fix',
+    'ask ai',
+    'generate',
+    'explain',
+    'chat',
+];
+
+/**
+ * Check if a code action is a third-party extension command that should be excluded
+ * from batch application (applyAll/applyPreferred).
+ * 
+ * Third-party command-only actions (like "Fix with Cline") can cause infinite loops
+ * because they don't actually consume the diagnostic and will reappear on every refresh.
+ * 
+ * AI-powered actions are excluded even if they have workspace edits, because:
+ * 1. They may trigger interactive dialogs
+ * 2. Their behavior is non-deterministic
+ * 3. They may not actually resolve the underlying diagnostic
+ * 
+ * @param action The code action to check
+ * @returns true if the action should be excluded from batch operations
+ */
+export function isThirdPartyCommandAction(action: vscode.CodeAction): boolean {
+    const titleLower = action.title.toLowerCase();
+    
+    // Check title for AI-related keywords FIRST (before checking workspace edits)
+    // AI actions should be excluded regardless of whether they have edits
+    const isAiAction = AI_ACTION_TITLE_KEYWORDS.some(keyword => 
+        titleLower.includes(keyword)
+    );
+    
+    if (isAiAction) {
+        logger.info(`[isThirdPartyCommandAction] Excluding AI-powered action by title: "${action.title}"`);
+        return true;
+    }
+    
+    // If it has a workspace edit and passed the AI title check, it's likely a real fix
+    if (action.edit && action.edit.size > 0) {
+        return false;
+    }
+    
+    // If it has no command, it's safe (pure edit action)
+    if (!action.command) {
+        return false;
+    }
+    
+    const commandName = action.command.command;
+    
+    // Check if command is explicitly excluded (AI commands, interactive commands, etc.)
+    const isExcluded = EXCLUDED_COMMANDS.some(excluded => 
+        commandName.startsWith(excluded)
+    );
+    
+    if (isExcluded) {
+        logger.info(`[isThirdPartyCommandAction] Excluding interactive/AI action: "${action.title}" (command: ${commandName})`);
+        return true;
+    }
+    
+    // Check if it's a trusted built-in command
+    const isTrusted = TRUSTED_COMMAND_PREFIXES.some(prefix => 
+        commandName.startsWith(prefix)
+    );
+    
+    if (!isTrusted) {
+        logger.info(`[isThirdPartyCommandAction] Excluding third-party action: "${action.title}" (command: ${commandName})`);
+        return true;
+    }
+    
+    return false;
+}
+
 // ============================================
 // Code Actions
 // ============================================
@@ -202,6 +297,14 @@ export async function listCodeActions(
 export function isDangerousQuickfix(action: vscode.CodeAction): boolean {
     const title = action.title.toLowerCase();
     const hasSafeRemovalKeyword = SAFE_REMOVAL_KEYWORDS.some(keyword => title.includes(keyword));
+    
+    // TypeScript's "Remove unused declaration for: 'XXX'" format explicitly names the symbol,
+    // making it a targeted, safe removal. Don't filter these.
+    // Examples: "Remove unused declaration for: 'ToolCategory'"
+    //           "Remove unused declaration for: 'NextFunction'"
+    if (title.includes("remove unused declaration for:")) {
+        return false;
+    }
     
     // We only treat "remove unused" style actions as dangerous when they don't clearly
     // target a specific, intentionally unused symbol (parameter, variable, etc.).
@@ -425,10 +528,14 @@ export async function applyAllQuickfixes(
             currentRange
         ) || [];
         
-        // Filter to quickfix actions only, excluding dangerous ones and previously failed ones
+        // Filter to quickfix actions only, excluding:
+        // - dangerous actions (overly broad removals)
+        // - previously failed actions
+        // - third-party command-only actions (like "Fix with Cline") that cause infinite loops
         const quickfixActions = freshActions.filter(a =>
             a.kind?.value?.startsWith('quickfix') &&
             !isDangerousQuickfix(a) &&
+            !isThirdPartyCommandAction(a) &&
             !failedActionTitles.has(a.title) &&
             (!onlyPreferred || a.isPreferred === true)
         );
