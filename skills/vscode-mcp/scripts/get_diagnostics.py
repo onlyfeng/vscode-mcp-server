@@ -6,23 +6,26 @@ NOTE: This script requires diagnostics to be enabled in vscode-mcp-server config
 With semantic-only.json preset, this endpoint is disabled (403).
 
 Usage:
-    python get_diagnostics.py [path] [--port PORT]
+    python get_diagnostics.py [path] [--port PORT] [--json]
     
 Example:
     python get_diagnostics.py                     # Get all diagnostics
     python get_diagnostics.py src/main.ts         # Get diagnostics for specific file
     python get_diagnostics.py --port 3001         # Use custom port
+    python get_diagnostics.py src/main.ts --json  # Output raw JSON
 """
 
 import sys
 import io
 
 # 设置 stdout 编码为 UTF-8，解决 Windows 控制台 GBK 编码问题
-if sys.stdout.encoding.lower() != 'utf-8':
+encoding = sys.stdout.encoding
+if encoding is None or encoding.lower() != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 import argparse
+import json
 
 try:
     import requests
@@ -93,7 +96,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Get VS Code diagnostics")
     parser.add_argument("path", nargs="?", help="File path (optional)")
     parser.add_argument("--port", type=int, default=3000, help="Server port")
+    parser.add_argument("--json", action="store_true", help="Output raw JSON")
     args = parser.parse_args()
     
     data = get_diagnostics(args.path, args.port)
-    format_diagnostics(data)
+    
+    if args.json:
+        print(json.dumps(data, indent=2, ensure_ascii=False))
+    else:
+        format_diagnostics(data)

@@ -11,21 +11,21 @@ This skill provides **semantic code analysis** capabilities via VS Code's langua
 
 Use this skill for tasks that require **semantic understanding** of code:
 
-| Task | Trigger Scenarios | API |
-|------|-------------------|-----|
-| **Find References** | 用户问"这个变量在哪里被使用"；重构前检查影响范围；确认修改是否遗漏 | `/api/symbols/references` |
-| **Go to Definition** | 用户问"查看定义"；需要了解变量/函数的类型；跳转到实现 | `/api/symbols/definition` |
-| **Rename Symbol** | 用户要求重命名；重构变量/函数/类名；跨文件安全替换 | `/api/refactor/rename` |
-| **Code Actions / Quickfix** | 用户要求 quickfix/快速修复/Quick Fix；先 list 查看可用修复，再 apply 执行 | `/api/refactor/code-actions` → `/api/refactor/apply-action` |
-| **Search Symbols** | 用户搜索某个类/函数；了解代码结构 | `/api/symbols/workspace` |
-| **Document Outline** | 用户要求列出文件结构；快速了解模块组成 | `/api/symbols/document` |
+| Task | Trigger Scenarios | Python Script |
+|------|-------------------|---------------|
+| **Find References** | 用户问"这个变量在哪里被使用"；重构前检查影响范围；确认修改是否遗漏 | `find_references.py` |
+| **Go to Definition** | 用户问"查看定义"；需要了解变量/函数的类型；跳转到实现 | `get_definition.py` |
+| **Rename Symbol** | 用户要求重命名；重构变量/函数/类名；跨文件安全替换 | `rename_symbol.py` |
+| **Code Actions / Quickfix** | 用户要求 quickfix/快速修复/Quick Fix；先 list 查看可用修复，再 apply 执行 | `code_actions.py` |
+| **Search Symbols** | 用户搜索某个类/函数；了解代码结构 | `search_symbols.py` |
+| **Document Outline** | 用户要求列出文件结构；快速了解模块组成 | `get_document_symbols.py` |
 
 ### Agent 自动化任务中的典型触发场景
 
-1. **Quickfix / Code Actions**：用户要求快速修复 → 先调用 list code actions 查看有哪些可用修复，再调用 apply 执行
-2. **安全重构**：修改函数签名前 → 使用 references API 找到所有调用点，确保不遗漏
-3. **批量重命名**：需要在多个文件中重命名变量 → 使用 rename API（比 grep + 手动替换更安全）
-4. **理解代码**：需要了解某个变量的类型或来源 → 使用 definition API
+1. **Quickfix / Code Actions**：用户要求快速修复 → 先调用 `code_actions.py` 查看有哪些可用修复，再调用 `--apply` 执行
+2. **安全重构**：修改函数签名前 → 使用 `find_references.py` 找到所有调用点，确保不遗漏
+3. **批量重命名**：需要在多个文件中重命名变量 → 使用 `rename_symbol.py`（比 grep + 手动替换更安全）
+4. **理解代码**：需要了解某个变量的类型或来源 → 使用 `get_definition.py`
 
 > **Why this skill vs Cursor built-in tools?**
 > - Cursor's `grep` finds text matches, but can't understand semantic scope
@@ -36,94 +36,163 @@ Use this skill for tasks that require **semantic understanding** of code:
 1. Install the **vscode-mcp-server** VS Code extension
 2. Enable the MCP server (click status bar or run command `MCP: Start Server`)
 3. Server runs at `http://127.0.0.1:3000` by default
+4. Install Python dependencies: `pip install -r scripts/requirements.txt`
 
 ## Quick Start
 
-```powershell
-# PowerShell (Windows) - 推荐使用 Invoke-RestMethod
-Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/health" | ConvertTo-Json
+```bash
+# Install dependencies
+pip install -r scripts/requirements.txt
 
-# Bash/curl (Linux/macOS)
-curl http://127.0.0.1:3000/api/health
+# Test connection
+python scripts/test_connection.py
+
+# Get server info
+python scripts/server_info.py
 ```
 
-## Windows PowerShell 调用最佳实践
+## Python Scripts
 
-### 为什么推荐 Invoke-RestMethod 而非 curl.exe
+All API capabilities are exposed via Python scripts in the `scripts/` directory. This approach avoids cross-platform issues with PowerShell/curl JSON escaping.
 
-在 Windows PowerShell 环境下，使用 `curl.exe` 传递 JSON 存在严重的转义问题：
-- `"` 双引号需要转义为 `\"`
-- `$` 符号会被解析为 PowerShell 变量
-- `@` 符号会被解析为 PowerShell 展开运算符
-- 复杂 JSON 在命令行中难以正确传递
+### Server Operations
 
-**强烈推荐使用 `Invoke-RestMethod`**，这是 PowerShell 原生方式，无需担心 JSON 转义。
+```bash
+# Test connection and health check
+python scripts/test_connection.py
+python scripts/test_connection.py 3001  # Custom port
 
-### GET 请求（两种方式都可靠）
-
-```powershell
-# Invoke-RestMethod（推荐）
-Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/symbols/document?path=src/server.ts" | ConvertTo-Json -Depth 3
-
-# curl.exe（GET 请求无 JSON body，通常安全）
-curl.exe -s "http://127.0.0.1:3000/api/symbols/document?path=src/server.ts"
+# Get server info and endpoint status
+python scripts/server_info.py
+python scripts/server_info.py --json  # Raw JSON output
 ```
 
-### POST 请求（仅推荐 Invoke-RestMethod）
+### Document Symbols (文档大纲)
 
-```powershell
-# ✅ Invoke-RestMethod（推荐 - 无转义问题）
-$body = @{ requestId = "ca_123"; index = 0 } | ConvertTo-Json
-Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/refactor/apply-action" -Method Post -Body $body -ContentType "application/json"
+Get all symbols (classes, functions, variables) in a file:
 
-# ❌ curl.exe（不推荐 - 转义复杂且易出错）
-# 以下写法在 PowerShell 中容易因引号和变量解析出错
-# curl.exe -X POST ... -d '{"key":"value"}'  # 单引号在 PowerShell 中不能用于 curl.exe 参数
+```bash
+python scripts/get_document_symbols.py src/server.ts
+python scripts/get_document_symbols.py src/utils.ts --port 3001
+python scripts/get_document_symbols.py src/server.ts --json
 ```
 
-### 通过 powershell -Command 调用（AI Agent 场景）
+### Search Workspace Symbols (搜索符号)
 
-当通过外部调用 `powershell -Command "..."` 时，`$` 变量会被外层 shell 提前解析。必须使用反引号转义：
+Search for symbols across the entire workspace:
 
-```powershell
-# ✅ 正确写法（`$ 转义）
-powershell -Command "`$body = @{ requestId = 'ca_123'; index = 0 } | ConvertTo-Json; Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/refactor/apply-action' -Method Post -Body `$body -ContentType 'application/json'"
-
-# ❌ 错误写法（$ 未转义，会丢失变量）
-powershell -Command "$body = @{ requestId = 'ca_123'; index = 0 } | ConvertTo-Json; ..."
+```bash
+python scripts/search_symbols.py MyClass
+python scripts/search_symbols.py Handler --max 20
+python scripts/search_symbols.py "get*" --json
 ```
 
-### 布尔值处理
+### Find References (查找引用)
 
-PowerShell 中布尔值为 `$true` / `$false`，通过 `powershell -Command` 调用时需转义为 `` `$true `` / `` `$false ``：
+Find all references to a symbol:
 
-```powershell
-# 直接 PowerShell 会话
-$body = @{ requestId = "ca_123"; applyAll = $true } | ConvertTo-Json
-
-# 通过 powershell -Command 调用
-powershell -Command "`$body = @{ requestId = 'ca_123'; applyAll = `$true } | ConvertTo-Json; ..."
+```bash
+python scripts/find_references.py src/server.ts 25 MCPServer
+python scripts/find_references.py src/utils.ts 10 myFunction --port 3001
 ```
 
-### curl.exe 替代方案（如必须使用）
+### Go to Definition (跳转定义)
 
-如果必须使用 curl.exe 进行 POST 请求，推荐使用临时文件避免命令行转义问题：
+Get the definition location of a symbol:
 
-```powershell
-# 方法1：写入临时文件（推荐）
-$json = '{"requestId":"ca_123","index":0}'
-$json | Out-File -FilePath "$env:TEMP\body.json" -Encoding utf8 -NoNewline
-curl.exe -s -X POST "http://127.0.0.1:3000/api/refactor/apply-action" -H "Content-Type: application/json" --data-binary "@$env:TEMP\body.json"
-
-# 方法2：使用 ConvertTo-Json 确保正确格式
-$body = @{ requestId = "ca_123"; index = 0 } | ConvertTo-Json -Compress
-$body | Out-File -FilePath "$env:TEMP\body.json" -Encoding utf8 -NoNewline
-curl.exe -s -X POST "http://127.0.0.1:3000/api/refactor/apply-action" -H "Content-Type: application/json" --data-binary "@$env:TEMP\body.json"
+```bash
+python scripts/get_definition.py src/server.ts 25 MCPServer
+python scripts/get_definition.py src/utils.ts 10 myFunction --json
 ```
 
-> **注意**：使用 `--data-binary "@path"` 读取文件时，路径中的 `@` 需要紧跟文件路径，且在 PowerShell 中需要正确处理路径变量。
+### Rename Symbol (重命名)
 
-## Core REST API Endpoints
+Safely rename a symbol across the entire workspace:
+
+```bash
+# Preview rename (不执行实际修改)
+python scripts/rename_symbol.py src/server.ts 25 MCPServer McpServer --preview
+
+# Apply rename (执行实际修改)
+python scripts/rename_symbol.py src/server.ts 25 MCPServer McpServer
+```
+
+### Code Actions / Quickfix (快速修复)
+
+List and apply code actions:
+
+```bash
+# List available code actions for entire file
+python scripts/code_actions.py src/server.ts
+
+# List code actions for specific line range
+python scripts/code_actions.py src/server.ts --startLine 10 --endLine 20
+
+# Apply specific action by index
+python scripts/code_actions.py src/server.ts --apply ca_1234567890_abc123 0
+
+# Apply only preferred (⭐) quickfix actions (recommended)
+python scripts/code_actions.py src/server.ts --apply-preferred ca_1234567890_abc123
+
+# Apply all quickfix actions
+python scripts/code_actions.py src/server.ts --apply-all ca_1234567890_abc123
+```
+
+**优先级规则**: `--apply <index>` > `--apply-preferred` > `--apply-all`
+
+### Get Diagnostics (获取诊断)
+
+> Note: Requires diagnostics to be enabled in server configuration.
+
+```bash
+python scripts/get_diagnostics.py                  # All diagnostics
+python scripts/get_diagnostics.py src/server.ts   # Specific file
+```
+
+## Workflow Examples
+
+### Workflow 1: Find References and Rename
+
+```bash
+# Step 1: Find all references to understand impact
+python scripts/find_references.py src/server.ts 25 MCPServer
+
+# Step 2: Preview rename changes
+python scripts/rename_symbol.py src/server.ts 25 MCPServer McpServer --preview
+
+# Step 3: Apply rename if satisfied
+python scripts/rename_symbol.py src/server.ts 25 MCPServer McpServer
+```
+
+### Workflow 2: Batch Fix with Code Actions
+
+```bash
+# Step 1: Get code actions (记录返回的 requestId)
+python scripts/code_actions.py src/server.ts --startLine 1 --endLine -1
+
+# Step 2a: Apply only preferred (⭐) quickfix actions (推荐)
+python scripts/code_actions.py src/server.ts --apply-preferred ca_xxxxxxxxx_xxxxxx
+
+# Step 2b: Or apply all quickfix actions
+python scripts/code_actions.py src/server.ts --apply-all ca_xxxxxxxxx_xxxxxx
+```
+
+### Workflow 3: Understand Code Structure
+
+```bash
+# Get document outline
+python scripts/get_document_symbols.py src/server.ts
+
+# Search for related symbols in workspace
+python scripts/search_symbols.py Handler --max 20
+
+# Get definition of a symbol
+python scripts/get_definition.py src/server.ts 25 MCPServer
+```
+
+## REST API Reference
+
+For direct API access, all endpoints are available via HTTP:
 
 ### Server Info (Always Available)
 | Method | Endpoint | Description |
@@ -134,298 +203,17 @@ curl.exe -s -X POST "http://127.0.0.1:3000/api/refactor/apply-action" -H "Conten
 ### Symbol Operations
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/symbols/document?path=src/main.ts` | Get document symbols (classes, functions, etc.) |
-| GET | `/api/symbols/workspace?query=MyClass&maxResults=10` | Search symbols across workspace (maxResults optional, default: 10) |
-| GET | `/api/symbols/references?path=...&line=10&symbol=myFunc` | Find all references to a symbol |
+| GET | `/api/symbols/document?path=src/main.ts` | Get document symbols |
+| GET | `/api/symbols/workspace?query=MyClass&maxResults=10` | Search workspace symbols |
+| GET | `/api/symbols/references?path=...&line=10&symbol=myFunc` | Find all references |
 | GET | `/api/symbols/definition?path=...&line=10&symbol=myFunc` | Go to definition |
 
 ### Refactor Operations
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/refactor/code-actions?path=...&startLine=1&endLine=-1` | List available code actions |
-| POST | `/api/refactor/apply-action` | Apply a code action (body: requestId, index?/applyPreferred?/applyAll?) |
+| POST | `/api/refactor/apply-action` | Apply a code action |
 | POST | `/api/refactor/rename` | Rename symbol across workspace |
-
-## Usage Examples
-
-### Get Document Symbols
-
-**PowerShell（推荐）**
-```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/symbols/document?path=src/server.ts" | ConvertTo-Json -Depth 3
-```
-
-**通过 powershell -Command 调用**
-```powershell
-powershell -Command "Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/symbols/document?path=src/server.ts' | ConvertTo-Json -Depth 3"
-```
-
-**Bash/Linux/macOS**
-```bash
-curl -s "http://127.0.0.1:3000/api/symbols/document?path=src/server.ts"
-```
-
-### Find All References
-
-**PowerShell（推荐）**
-```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/symbols/references?path=src/server.ts&line=25&symbol=MCPServer" | ConvertTo-Json -Depth 3
-```
-
-**通过 powershell -Command 调用**
-```powershell
-powershell -Command "Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/symbols/references?path=src/server.ts&line=25&symbol=MCPServer' | ConvertTo-Json -Depth 3"
-```
-
-**Bash/Linux/macOS**
-```bash
-curl -s "http://127.0.0.1:3000/api/symbols/references?path=src/server.ts&line=25&symbol=MCPServer"
-```
-
-### Get Code Actions
-
-**PowerShell（推荐）**
-```powershell
-# Get all code actions for a file (endLine=-1 means entire file)
-Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/refactor/code-actions?path=src/server.ts&startLine=1&endLine=-1" | ConvertTo-Json -Depth 3
-```
-
-**通过 powershell -Command 调用**
-```powershell
-powershell -Command "Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/refactor/code-actions?path=src/server.ts&startLine=1&endLine=-1' | ConvertTo-Json -Depth 3"
-```
-
-**Bash/Linux/macOS**
-```bash
-curl -s "http://127.0.0.1:3000/api/refactor/code-actions?path=src/server.ts&startLine=1&endLine=-1"
-```
-
-Response:
-```json
-{
-  "requestId": "ca_1234567890_abc123",
-  "actions": [
-    { "index": 0, "title": "Remove unused import", "kind": "quickfix", "isPreferred": true },
-    { "index": 1, "title": "Organize imports", "kind": "source.organizeImports" }
-  ],
-  "count": 2,
-  "expiresIn": "60 seconds"
-}
-```
-
-### Apply Code Action
-
-**优先级规则**: `index` > `applyPreferred` > `applyAll`
-
-**PowerShell（直接会话 - 推荐）**
-```powershell
-# Apply specific action by index（最高优先级）
-$body = @{ requestId = "ca_1234567890_abc123"; index = 0 } | ConvertTo-Json
-Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/refactor/apply-action" -Method Post -Body $body -ContentType "application/json" | ConvertTo-Json -Depth 5
-
-# Apply only preferred (⭐) quickfix actions（推荐 - 只应用 VS Code 推荐的修复）
-$body = @{ requestId = "ca_1234567890_abc123"; applyPreferred = $true } | ConvertTo-Json
-Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/refactor/apply-action" -Method Post -Body $body -ContentType "application/json" | ConvertTo-Json -Depth 5
-
-# Apply all quickfix actions at once
-$body = @{ requestId = "ca_1234567890_abc123"; applyAll = $true } | ConvertTo-Json
-Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/refactor/apply-action" -Method Post -Body $body -ContentType "application/json" | ConvertTo-Json -Depth 5
-```
-
-**通过 powershell -Command 调用（AI Agent 场景 - 注意 `$ 转义）**
-```powershell
-# Apply specific action by index
-powershell -Command "`$body = @{ requestId = 'ca_1234567890_abc123'; index = 0 } | ConvertTo-Json; Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/refactor/apply-action' -Method Post -Body `$body -ContentType 'application/json' | ConvertTo-Json -Depth 5"
-
-# Apply only preferred (⭐) quickfix actions（推荐）
-powershell -Command "`$body = @{ requestId = 'ca_1234567890_abc123'; applyPreferred = `$true } | ConvertTo-Json; Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/refactor/apply-action' -Method Post -Body `$body -ContentType 'application/json' | ConvertTo-Json -Depth 5"
-
-# Apply all quickfix actions at once（注意 `$true 转义）
-powershell -Command "`$body = @{ requestId = 'ca_1234567890_abc123'; applyAll = `$true } | ConvertTo-Json; Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/refactor/apply-action' -Method Post -Body `$body -ContentType 'application/json' | ConvertTo-Json -Depth 5"
-```
-
-**Bash/Linux/macOS**
-```bash
-# Apply specific action by index
-curl -s -X POST "http://127.0.0.1:3000/api/refactor/apply-action" \
-  -H "Content-Type: application/json" \
-  -d '{"requestId":"ca_1234567890_abc123","index":0}'
-
-# Apply only preferred (⭐) quickfix actions（推荐）
-curl -s -X POST "http://127.0.0.1:3000/api/refactor/apply-action" \
-  -H "Content-Type: application/json" \
-  -d '{"requestId":"ca_1234567890_abc123","applyPreferred":true}'
-
-# Apply all quickfix actions
-curl -s -X POST "http://127.0.0.1:3000/api/refactor/apply-action" \
-  -H "Content-Type: application/json" \
-  -d '{"requestId":"ca_1234567890_abc123","applyAll":true}'
-```
-
-> **⚠️ Windows curl.exe 注意事项**：
-> - `curl -d @file.json` 语法在 PowerShell 中不可用（`@` 被解释为展开运算符）
-> - 直接在命令行传递 JSON 需要复杂的引号转义，极易出错
-> - **强烈推荐使用 `Invoke-RestMethod`**，避免所有转义问题
-
-> **💡 AI Agent 调用提示**：当通过 `powershell -Command "..."` 调用时：
-> - `$` 变量必须转义为 `` `$ ``（如 `` `$body `` 而非 `$body`）
-> - `$true`/`$false` 必须转义为 `` `$true ``/`` `$false ``
-> - 使用单引号包裹字符串值（如 `'ca_123'` 而非 `"ca_123"`）
-
-### Batch Fix (Fix All & Quickfix Sweep)
-
-- **`applyPreferred=true`**（推荐）: 只应用标记为 preferred (⭐) 的 quickfix actions。这些是 VS Code/TypeScript 推荐的安全修复，如移除未使用的 import、参数加下划线前缀等。
-- **`applyAll=true`**: 应用所有 quickfix actions（不包括可能危险的 "Remove unused declaration" 等）。
-- **优先级**: `index` > `applyPreferred` > `applyAll`
-- When a provider exposes a `source.fixAll` / `refactor.fixAll` action such as "Prefix all unused declarations" but fails to return edits, the REST layer automatically falls back to this quickfix sweep so you still get a complete batch fix.
-- Recommended flow:
-  1. Call `list_code_actions_code` or `/api/refactor/code-actions?startLine=1&endLine=-1` to obtain a `requestId`;
-  2. Apply with `applyPreferred=true` to fix only recommended issues;
-  3. Or use `applyAll=true` if you want to apply all safe quickfix actions.
-
-**PowerShell（直接会话 - 推荐）**
-```powershell
-# Step 1: Get code actions
-$list = Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/refactor/code-actions?path=src/server.ts&startLine=1&endLine=-1"
-$list | ConvertTo-Json -Depth 3
-
-# Step 2a: Apply only preferred (⭐) quickfix actions（推荐）
-$body = @{ requestId = $list.requestId; applyPreferred = $true } | ConvertTo-Json
-Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/refactor/apply-action" -Method Post -Body $body -ContentType "application/json" | ConvertTo-Json -Depth 5
-
-# Step 2b: Or apply all quickfix actions
-$body = @{ requestId = $list.requestId; applyAll = $true } | ConvertTo-Json
-Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/refactor/apply-action" -Method Post -Body $body -ContentType "application/json" | ConvertTo-Json -Depth 5
-```
-
-**通过 powershell -Command 调用（需转义 `$ 变量）**
-```powershell
-# Step 1: Get code actions（记录返回的 requestId）
-powershell -Command "Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/refactor/code-actions?path=src/server.ts&startLine=1&endLine=-1' | ConvertTo-Json -Depth 3"
-
-# Step 2a: Apply only preferred (⭐) quickfix actions（推荐）
-powershell -Command "`$body = @{ requestId = 'ca_xxxxxxxxx_xxxxxx'; applyPreferred = `$true } | ConvertTo-Json; Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/refactor/apply-action' -Method Post -Body `$body -ContentType 'application/json' | ConvertTo-Json -Depth 5"
-
-# Step 2b: Or apply all quickfix actions
-powershell -Command "`$body = @{ requestId = 'ca_xxxxxxxxx_xxxxxx'; applyAll = `$true } | ConvertTo-Json; Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/refactor/apply-action' -Method Post -Body `$body -ContentType 'application/json' | ConvertTo-Json -Depth 5"
-```
-
-**Bash/Linux/macOS**
-```bash
-# Step 1: Get code actions and note the requestId
-curl -s "http://127.0.0.1:3000/api/refactor/code-actions?path=src/server.ts&startLine=1&endLine=-1"
-
-# Step 2a: Apply only preferred (⭐) quickfix actions（推荐）
-curl -s -X POST "http://127.0.0.1:3000/api/refactor/apply-action" \
-  -H "Content-Type: application/json" \
-  -d '{"requestId":"ca_xxxxxxxxx_xxxxxx","applyPreferred":true}'
-
-# Step 2b: Or apply all quickfix actions
-curl -s -X POST "http://127.0.0.1:3000/api/refactor/apply-action" \
-  -H "Content-Type: application/json" \
-  -d '{"requestId":"ca_xxxxxxxxx_xxxxxx","applyAll":true}'
-```
-
-### Rename Symbol
-
-> **🎯 AI Agent 推荐方案**：使用 Python 脚本可完全避免 PowerShell 转义问题，跨平台兼容。
-
-**Python 脚本（强烈推荐 - 无转义问题，跨平台）**
-```bash
-# Preview rename
-python scripts/rename_symbol.py src/server.ts 25 MCPServer McpServer --preview
-
-# Apply rename
-python scripts/rename_symbol.py src/server.ts 25 MCPServer McpServer
-```
-
-**PowerShell（直接会话）**
-```powershell
-# Preview rename (apply=$false)
-$body = @{ path = "src/server.ts"; line = 25; symbol = "MCPServer"; newName = "McpServer"; apply = $false } | ConvertTo-Json
-Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/refactor/rename" -Method Post -Body $body -ContentType "application/json" | ConvertTo-Json -Depth 3
-
-# Apply rename (apply=$true)
-$body = @{ path = "src/server.ts"; line = 25; symbol = "MCPServer"; newName = "McpServer"; apply = $true } | ConvertTo-Json
-Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/refactor/rename" -Method Post -Body $body -ContentType "application/json" | ConvertTo-Json -Depth 3
-```
-
-**PowerShell 临时文件方式（避免 `powershell -Command` 转义问题）**
-```powershell
-# 使用临时文件避免命令行转义问题
-$json = '{"path":"src/server.ts","line":25,"symbol":"MCPServer","newName":"McpServer","apply":true}'
-$json | Out-File -FilePath "$env:TEMP\rename_body.json" -Encoding utf8 -NoNewline
-Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/refactor/rename" -Method Post -ContentType "application/json" -InFile "$env:TEMP\rename_body.json" | ConvertTo-Json -Depth 3
-```
-
-**通过 powershell -Command 调用（注意 `$false / `$true 转义）**
-```powershell
-# Preview rename
-powershell -Command "`$body = @{ path = 'src/server.ts'; line = 25; symbol = 'MCPServer'; newName = 'McpServer'; apply = `$false } | ConvertTo-Json; Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/refactor/rename' -Method Post -Body `$body -ContentType 'application/json' | ConvertTo-Json -Depth 3"
-
-# Apply rename
-powershell -Command "`$body = @{ path = 'src/server.ts'; line = 25; symbol = 'MCPServer'; newName = 'McpServer'; apply = `$true } | ConvertTo-Json; Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/refactor/rename' -Method Post -Body `$body -ContentType 'application/json' | ConvertTo-Json -Depth 3"
-```
-
-**Bash/Linux/macOS**
-```bash
-# Preview rename
-curl -s -X POST "http://127.0.0.1:3000/api/refactor/rename" \
-  -H "Content-Type: application/json" \
-  -d '{"path":"src/server.ts","line":25,"symbol":"MCPServer","newName":"McpServer","apply":false}'
-
-# Apply rename
-curl -s -X POST "http://127.0.0.1:3000/api/refactor/rename" \
-  -H "Content-Type: application/json" \
-  -d '{"path":"src/server.ts","line":25,"symbol":"MCPServer","newName":"McpServer","apply":true}'
-```
-
-## Workflow: Find References and Rename
-
-**PowerShell（直接会话 - 推荐）**
-```powershell
-# Step 1: Find all references to understand impact
-$refs = Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/symbols/references?path=src/server.ts&line=25&symbol=MCPServer"
-Write-Host "Found $($refs.count) references"
-$refs.references | ConvertTo-Json
-
-# Step 2: Preview rename changes
-$body = @{ path = "src/server.ts"; line = 25; symbol = "MCPServer"; newName = "McpServer"; apply = $false } | ConvertTo-Json
-$preview = Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/refactor/rename" -Method Post -Body $body -ContentType "application/json"
-$preview.affectedFiles | ConvertTo-Json
-
-# Step 3: Apply rename if satisfied
-$body = @{ path = "src/server.ts"; line = 25; symbol = "MCPServer"; newName = "McpServer"; apply = $true } | ConvertTo-Json
-Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/refactor/rename" -Method Post -Body $body -ContentType "application/json" | ConvertTo-Json -Depth 3
-```
-
-**通过 powershell -Command 调用（注意所有 `$ 转义）**
-```powershell
-# Step 1: Find all references
-powershell -Command "`$refs = Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/symbols/references?path=src/server.ts&line=25&symbol=MCPServer'; Write-Host 'Found' `$refs.count 'references'; `$refs.references | ConvertTo-Json"
-
-# Step 2: Preview rename
-powershell -Command "`$body = @{ path = 'src/server.ts'; line = 25; symbol = 'MCPServer'; newName = 'McpServer'; apply = `$false } | ConvertTo-Json; `$preview = Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/refactor/rename' -Method Post -Body `$body -ContentType 'application/json'; `$preview.affectedFiles | ConvertTo-Json"
-
-# Step 3: Apply rename
-powershell -Command "`$body = @{ path = 'src/server.ts'; line = 25; symbol = 'MCPServer'; newName = 'McpServer'; apply = `$true } | ConvertTo-Json; Invoke-RestMethod -Uri 'http://127.0.0.1:3000/api/refactor/rename' -Method Post -Body `$body -ContentType 'application/json' | ConvertTo-Json -Depth 3"
-```
-
-**Bash/Linux/macOS**
-```bash
-# Step 1: Find all references to understand impact
-curl -s "http://127.0.0.1:3000/api/symbols/references?path=src/server.ts&line=25&symbol=MCPServer"
-
-# Step 2: Preview rename
-curl -s -X POST "http://127.0.0.1:3000/api/refactor/rename" \
-  -H "Content-Type: application/json" \
-  -d '{"path":"src/server.ts","line":25,"symbol":"MCPServer","newName":"McpServer","apply":false}'
-
-# Step 3: Apply rename
-curl -s -X POST "http://127.0.0.1:3000/api/refactor/rename" \
-  -H "Content-Type: application/json" \
-  -d '{"path":"src/server.ts","line":25,"symbol":"MCPServer","newName":"McpServer","apply":true}'
-```
 
 ## Configuration
 
@@ -452,56 +240,9 @@ This configuration:
 
 ### Check Current Configuration
 
-```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/info" | ConvertTo-Json -Depth 3
-```
-
-Response shows enabled status for each endpoint:
-```json
-{
-  "enabledTools": { "file": false, "symbol": true, "refactor": true, ... },
-  "endpoints": [
-    { "path": "/api/symbols/document", "enabled": true },
-    { "path": "/api/refactor/rename", "enabled": true },
-    ...
-  ]
-}
-```
-
-## Python Scripts
-
-Helper scripts in `scripts/` directory - **推荐用于 AI Agent 调用，避免 PowerShell 转义问题**：
-
 ```bash
-pip install -r scripts/requirements.txt
-
-# Test connection
-python scripts/test_connection.py
-
-# Find references
-python scripts/find_references.py src/server.ts 25 MCPServer
-
-# Rename symbol (推荐方式 - 无转义问题)
-python scripts/rename_symbol.py src/server.ts 25 MCPServer McpServer
-python scripts/rename_symbol.py src/server.ts 25 MCPServer McpServer --preview
-
-# Get diagnostics
-python scripts/get_diagnostics.py src/server.ts
-
-# Code actions - list available actions
-python scripts/code_actions.py src/server.ts --startLine 1 --endLine -1
-
-# Code actions - apply specific action by index
-python scripts/code_actions.py src/server.ts --apply ca_1234567890_abc123 0
-
-# Code actions - apply only preferred (⭐) quickfix actions
-python scripts/code_actions.py src/server.ts --apply-preferred ca_1234567890_abc123
-
-# Code actions - apply all quickfix actions
-python scripts/code_actions.py src/server.ts --apply-all ca_1234567890_abc123
+python scripts/server_info.py
 ```
-
-> **💡 Windows AI Agent 提示**：使用 Python 脚本可完全绕过 PowerShell 的 `$` 变量转义和 JSON 引号转义问题。
 
 ## MCP Tools (via MCP Protocol)
 
@@ -536,6 +277,16 @@ Disabled endpoint (403):
 ```json
 { "error": "File endpoints are disabled by configuration", "hint": "Update vscode-mcp-server.enabledTools setting" }
 ```
+
+## Script Options
+
+All scripts support common options:
+
+| Option | Description |
+|--------|-------------|
+| `--port PORT` | Server port (default: 3000) |
+| `--json` | Output raw JSON (where supported) |
+| `--help` | Show help message |
 
 ## Detailed API Documentation
 

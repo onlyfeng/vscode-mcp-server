@@ -3,22 +3,25 @@
 Rename a symbol using VS Code MCP Server.
 
 Usage:
-    python rename_symbol.py <path> <line> <symbol> <newName> [--port PORT] [--preview]
+    python rename_symbol.py <path> <line> <symbol> <newName> [--port PORT] [--preview] [--json]
     
 Example:
     python rename_symbol.py src/server.ts 25 MCPServer McpServer
     python rename_symbol.py src/server.ts 25 MCPServer McpServer --preview
+    python rename_symbol.py src/server.ts 25 MCPServer McpServer --json
 """
 
 import sys
 import io
 
 # 设置 stdout 编码为 UTF-8，解决 Windows 控制台 GBK 编码问题
-if sys.stdout.encoding.lower() != 'utf-8':
+encoding = sys.stdout.encoding
+if encoding is None or encoding.lower() != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 import argparse
+import json
 
 try:
     import requests
@@ -94,7 +97,12 @@ if __name__ == "__main__":
     parser.add_argument("newName", help="New name for the symbol")
     parser.add_argument("--port", type=int, default=3000, help="Server port")
     parser.add_argument("--preview", action="store_true", help="Preview changes without applying")
+    parser.add_argument("--json", action="store_true", help="Output raw JSON")
     args = parser.parse_args()
     
     data = rename_symbol(args.path, args.line, args.symbol, args.newName, apply=not args.preview, port=args.port)
-    format_result(data, args.preview)
+    
+    if args.json:
+        print(json.dumps(data, indent=2, ensure_ascii=False))
+    else:
+        format_result(data, args.preview)

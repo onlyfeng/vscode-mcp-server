@@ -3,22 +3,25 @@
 Find all references to a symbol using VS Code MCP Server.
 
 Usage:
-    python find_references.py <path> <line> <symbol> [--port PORT]
+    python find_references.py <path> <line> <symbol> [--port PORT] [--json]
     
 Example:
     python find_references.py src/main.ts 10 myFunction
     python find_references.py src/utils.ts 25 MyClass --port 3001
+    python find_references.py src/server.ts 25 MCPServer --json
 """
 
 import sys
 import io
 
 # 设置 stdout 编码为 UTF-8，解决 Windows 控制台 GBK 编码问题
-if sys.stdout.encoding.lower() != 'utf-8':
+encoding = sys.stdout.encoding
+if encoding is None or encoding.lower() != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 import argparse
+import json
 
 try:
     import requests
@@ -82,7 +85,12 @@ if __name__ == "__main__":
     parser.add_argument("line", type=int, help="Line number (1-based)")
     parser.add_argument("symbol", help="Symbol name")
     parser.add_argument("--port", type=int, default=3000, help="Server port")
+    parser.add_argument("--json", action="store_true", help="Output raw JSON")
     args = parser.parse_args()
     
     data = find_references(args.path, args.line, args.symbol, args.port)
-    format_references(data, args.symbol)
+    
+    if args.json:
+        print(json.dumps(data, indent=2, ensure_ascii=False))
+    else:
+        format_references(data, args.symbol)
