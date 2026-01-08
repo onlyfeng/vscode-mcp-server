@@ -817,11 +817,14 @@ export function registerRefactorTools(server: McpServer): void {
                             new vscode.Position(endLine, endChar)
                         );
                         
+                        // Don't specify kind='quickfix' here - doing so may cause TypeScript LS to return
+                        // different isPreferred values than when listing without kind filter.
+                        // We filter by kind in the next step instead.
                         const freshActions = await vscode.commands.executeCommand<vscode.CodeAction[]>(
                             'vscode.executeCodeActionProvider',
                             targetUri,
-                            currentRange,
-                            'quickfix'
+                            currentRange
+                            // No kind parameter - filter afterward to preserve isPreferred accuracy
                         ) || [];
                         
                         // Filter to quickfix actions only, excluding dangerous ones
