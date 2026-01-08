@@ -16,6 +16,13 @@ let serverEnabled: boolean = false;
 // Terminal name constant
 const TERMINAL_NAME = 'MCP Shell Commands';
 
+function getExtensionVersion(context: vscode.ExtensionContext): string | undefined {
+    // Some tests may provide a partial mock context
+    const anyContext = context as any;
+    const version = anyContext?.extension?.packageJSON?.version;
+    return typeof version === 'string' ? version : undefined;
+}
+
 /**
  * Gets or creates the shared terminal for the extension
  * @param context The extension context
@@ -78,7 +85,7 @@ async function toggleServerState(context: vscode.ExtensionContext): Promise<void
             logger.info(`[toggleServerState] Creating MCP server instance`);
             const terminal = getExtensionTerminal(context);
             const toolConfig = getToolConfiguration();
-            mcpServer = new MCPServer(port, host, terminal, toolConfig);
+            mcpServer = new MCPServer(port, host, terminal, toolConfig, getExtensionVersion(context));
             mcpServer.setFileListingCallback(async (path: string, recursive: boolean) => {
                 try {
                     return await listWorkspaceFiles(path, recursive);
@@ -157,7 +164,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
             // Initialize MCP server with the configured port, terminal, and tool configuration
             const toolConfig = getToolConfiguration();
-            mcpServer = new MCPServer(port, host, terminal, toolConfig);
+            mcpServer = new MCPServer(port, host, terminal, toolConfig, getExtensionVersion(context));
 
             // Set up file listing callback
             mcpServer.setFileListingCallback(async (path: string, recursive: boolean) => {
@@ -212,7 +219,7 @@ export async function activate(context: vscode.ExtensionContext) {
                     const terminal = getExtensionTerminal(context);
                     const toolConfig = getToolConfiguration();
                     
-                    mcpServer = new MCPServer(port, host, terminal, toolConfig);
+                    mcpServer = new MCPServer(port, host, terminal, toolConfig, getExtensionVersion(context));
                     mcpServer.setFileListingCallback(async (path: string, recursive: boolean) => {
                         try {
                             return await listWorkspaceFiles(path, recursive);

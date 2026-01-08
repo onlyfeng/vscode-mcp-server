@@ -11,6 +11,26 @@ import { createRestApiRouter } from './adapters/rest/router';
 // Re-export ToolConfiguration for backward compatibility
 export { ToolConfiguration } from './config';
 
+const EXTENSION_ID = 'onlyfeng.vscode-mcp-server';
+
+function resolveServerVersion(explicitVersion?: string): string {
+    if (explicitVersion && typeof explicitVersion === 'string') {
+        return explicitVersion;
+    }
+
+    try {
+        const ext = vscode.extensions.getExtension(EXTENSION_ID);
+        const version = (ext as any)?.packageJSON?.version;
+        if (typeof version === 'string' && version.length > 0) {
+            return version;
+        }
+    } catch {
+        // ignore - fallback below
+    }
+
+    return 'unknown';
+}
+
 export class MCPServer {
     private server: McpServer;
     private transport: StreamableHTTPServerTransport;
@@ -22,23 +42,31 @@ export class MCPServer {
     private fileListingCallback?: FileListingCallback;
     private terminal?: vscode.Terminal;
     private toolConfig: ToolConfiguration;
+    private serverVersion: string;
 
     public setFileListingCallback(callback: FileListingCallback) {
         this.fileListingCallback = callback;
     }
 
-    constructor(port: number = 3000, host: string = '127.0.0.1', terminal?: vscode.Terminal, toolConfig?: ToolConfiguration) {
+    constructor(
+        port: number = 3000,
+        host: string = '127.0.0.1',
+        terminal?: vscode.Terminal,
+        toolConfig?: ToolConfiguration,
+        serverVersion?: string
+    ) {
         this.port = port;
         this.host = host;
         this.terminal = terminal;
         this.toolConfig = toolConfig ?? { ...DEFAULT_TOOL_CONFIG };
+        this.serverVersion = resolveServerVersion(serverVersion);
         this.app = express();
         this.app.use(express.json());
 
         // Initialize MCP Server
         this.server = new McpServer({
             name: "vscode-mcp-server",
-            version: "1.0.0",
+            version: this.serverVersion,
         }, {
             capabilities: {
                 logging: {},

@@ -12,6 +12,19 @@ import {
 } from '../../core/lsp/symbols';
 
 suite('Core Symbols Operations Tests', () => {
+
+    async function findLineAndCharacter(filePath: string, symbol: string): Promise<{ line: number; character: number }> {
+        const uri = vscode.Uri.file(vscode.Uri.joinPath(vscode.workspace.workspaceFolders![0].uri, filePath).fsPath);
+        const doc = await vscode.workspace.openTextDocument(uri);
+        for (let i = 0; i < doc.lineCount; i++) {
+            const text = doc.lineAt(i).text;
+            const idx = text.indexOf(symbol);
+            if (idx !== -1) {
+                return { line: i + 1, character: idx };
+            }
+        }
+        throw new Error(`Test setup failed: symbol "${symbol}" not found in ${filePath}`);
+    }
     
     suite('getDocumentSymbols', () => {
         test('should get symbols from TypeScript file', async () => {
@@ -150,8 +163,8 @@ suite('Core Symbols Operations Tests', () => {
             }
             
             // Find references to MCPServer in server.ts
-            // MCPServer class is defined on line 14 (export class MCPServer {)
-            const result = await findReferences('src/server.ts', 14, undefined, 'MCPServer', true);
+            const { line } = await findLineAndCharacter('src/server.ts', 'MCPServer');
+            const result = await findReferences('src/server.ts', line, undefined, 'MCPServer', true);
             
             assert.ok(result.success, `Should succeed: ${result.error}`);
             assert.ok(result.data, 'Should have data');
@@ -164,7 +177,8 @@ suite('Core Symbols Operations Tests', () => {
                 return;
             }
             
-            const result = await findReferences('src/server.ts', 14, undefined, 'MCPServer', true);
+            const { line } = await findLineAndCharacter('src/server.ts', 'MCPServer');
+            const result = await findReferences('src/server.ts', line, undefined, 'MCPServer', true);
             
             if (result.success && result.data && result.data.length > 0) {
                 const ref = result.data[0];
@@ -227,8 +241,8 @@ suite('Core Symbols Operations Tests', () => {
                 return;
             }
             
-            // Get hover info for MCPServer class (line 14: export class MCPServer {)
-            const result = await getSymbolHoverInfo('src/server.ts', 14, 13);
+            const { line, character } = await findLineAndCharacter('src/server.ts', 'MCPServer');
+            const result = await getSymbolHoverInfo('src/server.ts', line, character);
             
             assert.ok(result.success, `Should succeed: ${result.error}`);
             assert.ok(result.data, 'Should have data');
@@ -240,7 +254,8 @@ suite('Core Symbols Operations Tests', () => {
                 return;
             }
             
-            const result = await getSymbolHoverInfo('src/server.ts', 14, undefined, 'MCPServer');
+            const { line } = await findLineAndCharacter('src/server.ts', 'MCPServer');
+            const result = await getSymbolHoverInfo('src/server.ts', line, undefined, 'MCPServer');
             
             assert.ok(result.success, `Should succeed: ${result.error}`);
             assert.ok(result.data, 'Should have data');
@@ -252,7 +267,8 @@ suite('Core Symbols Operations Tests', () => {
                 return;
             }
             
-            const result = await getSymbolHoverInfo('src/server.ts', 14, 13);
+            const { line, character } = await findLineAndCharacter('src/server.ts', 'MCPServer');
+            const result = await getSymbolHoverInfo('src/server.ts', line, character);
             
             if (result.success && result.data) {
                 assert.ok('contents' in result.data || 'hovers' in result.data, 
