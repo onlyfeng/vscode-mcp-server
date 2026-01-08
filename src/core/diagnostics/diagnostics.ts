@@ -1,17 +1,16 @@
 /**
- * Diagnostics Service - Core diagnostics logic shared by MCP tools and REST API
+ * Diagnostics Service - Core diagnostics logic
  * Handles getting and formatting diagnostics from VS Code
  */
 
 import * as vscode from 'vscode';
-import { logger } from '../utils/logger';
+import { logger } from '../../utils/logger';
 import {
     resolveToUri,
     uriToWorkspacePath,
     severityToString,
-    ServiceResult,
-    getWorkspaceRoot
-} from './common';
+    ServiceResult
+} from '../common';
 
 // ============================================
 // Types

@@ -3,24 +3,13 @@ import * as vscode from 'vscode';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { Server } from 'http';
-import { Request, Response } from 'express';
-import { registerFileTools, FileListingCallback } from './tools/file-tools';
-import { registerEditTools } from './tools/edit-tools';
-import { registerShellTools } from './tools/shell-tools';
-import { registerDiagnosticsTools } from './tools/diagnostics-tools';
-import { registerSymbolTools } from './tools/symbol-tools';
-import { registerRefactorTools } from './tools/refactor-tools';
-import { createRestApiRouter } from './api/rest-api';
 import { logger } from './utils/logger';
+import { ToolConfiguration, DEFAULT_TOOL_CONFIG } from './config';
+import { registerAllTools, FileListingCallback } from './adapters/mcp/toolRegistry';
+import { createRestApiRouter } from './adapters/rest/router';
 
-export interface ToolConfiguration {
-    file: boolean;
-    edit: boolean;
-    shell: boolean;
-    diagnostics: boolean;
-    symbol: boolean;
-    refactor: boolean;
-}
+// Re-export ToolConfiguration for backward compatibility
+export { ToolConfiguration } from './config';
 
 export class MCPServer {
     private server: McpServer;
@@ -41,14 +30,7 @@ export class MCPServer {
         this.port = port;
         this.host = host;
         this.terminal = terminal;
-        this.toolConfig = toolConfig || {
-            file: true,
-            edit: true,
-            shell: true,
-            diagnostics: true,
-            symbol: true,
-            refactor: true
-        };
+        this.toolConfig = toolConfig ?? { ...DEFAULT_TOOL_CONFIG };
         this.app = express();
         this.app.use(express.json());
 
@@ -76,60 +58,13 @@ export class MCPServer {
     }
     
     public setupTools(): void {
-        // Register tools from the tools module based on configuration
-        if (this.fileListingCallback) {
-            logger.info(`Setting up MCP tools with configuration: ${JSON.stringify(this.toolConfig)}`);
-            
-            // Register file tools if enabled
-            if (this.toolConfig.file) {
-                registerFileTools(this.server, this.fileListingCallback);
-                logger.info('MCP file tools registered successfully');
-            } else {
-                logger.info('MCP file tools disabled by configuration');
-            }
-            
-            // Register edit tools if enabled
-            if (this.toolConfig.edit) {
-                registerEditTools(this.server);
-                logger.info('MCP edit tools registered successfully');
-            } else {
-                logger.info('MCP edit tools disabled by configuration');
-            }
-            
-            // Register shell tools if enabled
-            if (this.toolConfig.shell) {
-                registerShellTools(this.server, this.terminal);
-                logger.info('MCP shell tools registered successfully');
-            } else {
-                logger.info('MCP shell tools disabled by configuration');
-            }
-            
-            // Register diagnostics tools if enabled
-            if (this.toolConfig.diagnostics) {
-                registerDiagnosticsTools(this.server);
-                logger.info('MCP diagnostics tools registered successfully');
-            } else {
-                logger.info('MCP diagnostics tools disabled by configuration');
-            }
-            
-            // Register symbol tools if enabled
-            if (this.toolConfig.symbol) {
-                registerSymbolTools(this.server);
-                logger.info('MCP symbol tools registered successfully');
-            } else {
-                logger.info('MCP symbol tools disabled by configuration');
-            }
-            
-            // Register refactor tools if enabled
-            if (this.toolConfig.refactor) {
-                registerRefactorTools(this.server);
-                logger.info('MCP refactor tools registered successfully');
-            } else {
-                logger.info('MCP refactor tools disabled by configuration');
-            }
-        } else {
-            logger.warn('File listing callback not set during tools setup');
-        }
+        // Register all MCP tools using the unified tool registry
+        registerAllTools(
+            this.server,
+            this.terminal,
+            this.toolConfig,
+            this.fileListingCallback
+        );
     }
 
     private setupRoutes(): void {

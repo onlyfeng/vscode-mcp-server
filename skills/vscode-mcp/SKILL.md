@@ -207,6 +207,7 @@ For direct API access, all endpoints are available via HTTP:
 | GET | `/api/symbols/workspace?query=MyClass&maxResults=10` | Search workspace symbols |
 | GET | `/api/symbols/references?path=...&line=10&symbol=myFunc` | Find all references |
 | GET | `/api/symbols/definition?path=...&line=10&symbol=myFunc` | Go to definition |
+| GET | `/api/symbols/hover?path=...&line=10&symbol=myFunc` | Get hover info (type signature, docs) |
 
 ### Refactor Operations
 | Method | Endpoint | Description |
@@ -251,7 +252,8 @@ Available MCP tools for direct protocol access:
 **Symbol Operations:**
 - `get_document_symbols_code` - Get document symbols
 - `search_symbols_code` - Search workspace symbols
-- `get_symbol_definition_code` - Navigate to symbol definition
+- `get_symbol_definition_code` - Go to definition location
+- `get_symbol_hover_code` - Get hover info (type signature, documentation)
 - `get_references_code` - Find all references to a symbol
 
 **Refactor Operations:**

@@ -1,5 +1,5 @@
 /**
- * Common utilities shared across all services
+ * Common utilities shared across all core modules
  * Provides path resolution, workspace helpers, and common types
  */
 
@@ -72,14 +72,22 @@ export function resolveToUri(inputPath: string): vscode.Uri {
 /**
  * Convert a workspace URI to a path relative to the workspace root
  * @param uri The URI to convert
- * @returns Path relative to workspace root
+ * @returns Path relative to workspace root, or absolute path if not in workspace
  */
 export function uriToWorkspacePath(uri: vscode.Uri): string {
     if (!vscode.workspace.workspaceFolders) {
         return uri.fsPath;
     }
     const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
-    return path.relative(workspaceRoot, uri.fsPath);
+    const relativePath = path.relative(workspaceRoot, uri.fsPath);
+    
+    // If the relative path starts with '..' it means the file is outside the workspace
+    // In that case, return the absolute path instead
+    if (relativePath.startsWith('..')) {
+        return uri.fsPath;
+    }
+    
+    return relativePath;
 }
 
 // ============================================
@@ -224,7 +232,7 @@ export async function saveAffectedDocuments(edit: vscode.WorkspaceEdit): Promise
 
 /**
  * Convert a symbol kind to a string representation
- * Uses switch case for safer conversion (consistent with tools implementation)
+ * Uses switch case for safer conversion
  */
 export function symbolKindToString(kind: vscode.SymbolKind): string {
     switch (kind) {
@@ -260,7 +268,7 @@ export function symbolKindToString(kind: vscode.SymbolKind): string {
 
 /**
  * Convert diagnostic severity to string
- * Uses switch case for safer conversion (consistent with tools implementation)
+ * Uses switch case for safer conversion
  */
 export function severityToString(severity: vscode.DiagnosticSeverity): string {
     switch (severity) {
@@ -275,4 +283,44 @@ export function severityToString(severity: vscode.DiagnosticSeverity): string {
         default:
             return 'Unknown';
     }
+}
+
+/**
+ * Get a preview of the code at a specific line
+ * @param uri The URI of the document
+ * @param line The line number (0-based)
+ * @returns The line content as a string or undefined if not available
+ */
+export async function getPreview(uri: vscode.Uri, line?: number): Promise<string | undefined> {
+    if (line === undefined) {
+        return undefined;
+    }
+
+    try {
+        const documents = vscode.workspace.textDocuments;
+        let document = documents.find(doc => doc.uri.toString() === uri.toString());
+        
+        if (!document) {
+            try {
+                const content = await vscode.workspace.fs.readFile(uri);
+                const text = Buffer.from(content).toString('utf8');
+                const lines = text.split(/\r?\n/);
+                
+                if (line >= 0 && line < lines.length) {
+                    return lines[line].trim();
+                }
+            } catch (error) {
+                logger.warn(`[getPreview] Could not read file: ${error instanceof Error ? error.message : String(error)}`);
+                return undefined;
+            }
+        } else {
+            if (line >= 0 && line < document.lineCount) {
+                return document.lineAt(line).text.trim();
+            }
+        }
+    } catch (error) {
+        logger.warn(`[getPreview] Error getting preview: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    
+    return undefined;
 }

@@ -1,10 +1,10 @@
 /**
- * Symbol Service - Core symbol analysis logic shared by MCP tools and REST API
- * Handles document symbols, workspace symbols, references, and definitions
+ * Symbol Service - Core symbol analysis logic
+ * Handles document symbols, workspace symbols, references, definitions, and hover info
  */
 
 import * as vscode from 'vscode';
-import { logger } from '../utils/logger';
+import { logger } from '../../utils/logger';
 import {
     resolveToUri,
     uriToWorkspacePath,
@@ -14,8 +14,9 @@ import {
     findSymbolInLine,
     validateLineNumber,
     symbolKindToString,
+    getPreview,
     ServiceResult
-} from './common';
+} from '../common';
 
 // ============================================
 // Types
@@ -66,6 +67,19 @@ export interface DefinitionInfo {
     endCharacter: number;
 }
 
+export interface HoverContent {
+    contents: string[];
+    range?: {
+        start: { line: number; character: number };
+        end: { line: number; character: number };
+    };
+    preview?: string;
+}
+
+export interface HoverInfo {
+    hovers: HoverContent[];
+}
+
 export interface DocumentSymbolsResult {
     symbols: DocumentSymbolInfo[];
     total: number;
@@ -99,7 +113,6 @@ export async function getDocumentSymbols(
             return { success: false, error: `File not found: ${filePath}` };
         }
         
-        // Execute the document symbol provider
         const symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
             'vscode.executeDocumentSymbolProvider',
             uri
@@ -110,10 +123,8 @@ export async function getDocumentSymbols(
         const flatSymbols: DocumentSymbolInfo[] = [];
         const kindCounts: Record<string, number> = {};
         
-        // Recursive function to process symbols and their children
         function processSymbols(symbols: vscode.DocumentSymbol[], depth: number = 0) {
             for (const symbol of symbols) {
-                // Skip if max depth exceeded
                 if (maxDepth !== undefined && depth > maxDepth) {
                     continue;
                 }
@@ -151,7 +162,6 @@ export async function getDocumentSymbols(
                 
                 flatSymbols.push(processedSymbol);
                 
-                // Recursively process children
                 if (symbol.children && symbol.children.length > 0) {
                     processSymbols(symbol.children, depth + 1);
                 }
@@ -267,13 +277,11 @@ export async function findReferences(
         
         const document = await openDocument(uri);
         
-        // Validate line number
         const lineError = validateLineNumber(line, document.lineCount);
         if (lineError) {
             return { success: false, error: lineError };
         }
         
-        // Determine character position
         let charPosition = character;
         if (charPosition === undefined) {
             if (!symbol) {
@@ -299,7 +307,6 @@ export async function findReferences(
         
         logger.info(`[findReferences] Found ${references.length} references`);
         
-        // Filter out declaration if requested
         let filteredRefs = references;
         if (!includeDeclaration && references.length > 0) {
             filteredRefs = references.filter(ref => 
@@ -325,11 +332,12 @@ export async function findReferences(
 }
 
 // ============================================
-// Definitions
+// Definitions (Location)
 // ============================================
 
 /**
- * Get symbol definition
+ * Get symbol definition location using vscode.executeDefinitionProvider
+ * Returns the file path and position where the symbol is defined
  * @param filePath Path to the file containing the symbol
  * @param line Line number (1-based)
  * @param character Character position (0-based), or undefined to search for symbol
@@ -352,13 +360,11 @@ export async function getDefinition(
         
         const document = await openDocument(uri);
         
-        // Validate line number
         const lineError = validateLineNumber(line, document.lineCount);
         if (lineError) {
             return { success: false, error: lineError };
         }
         
-        // Determine character position
         let charPosition = character;
         if (charPosition === undefined) {
             if (!symbol) {
@@ -412,9 +418,109 @@ export async function getDefinition(
 }
 
 // ============================================
+// Hover Info (Type/Docs)
+// ============================================
+
+/**
+ * Get hover information (type signature, documentation) for a symbol
+ * Uses vscode.executeHoverProvider to get type information and docs
+ * @param filePath Path to the file containing the symbol
+ * @param line Line number (1-based)
+ * @param character Character position (0-based), or undefined to search for symbol
+ * @param symbol Symbol name to search for (if character not provided)
+ */
+export async function getSymbolHoverInfo(
+    filePath: string,
+    line: number,
+    character?: number,
+    symbol?: string
+): Promise<ServiceResult<HoverInfo>> {
+    logger.info(`[getSymbolHoverInfo] path="${filePath}", line=${line}, character=${character}, symbol="${symbol}"`);
+    
+    try {
+        const uri = resolveToUri(filePath);
+        
+        if (!await fileExists(uri)) {
+            return { success: false, error: `File not found: ${filePath}` };
+        }
+        
+        const document = await openDocument(uri);
+        
+        const lineError = validateLineNumber(line, document.lineCount);
+        if (lineError) {
+            return { success: false, error: lineError };
+        }
+        
+        let charPosition = character;
+        if (charPosition === undefined) {
+            if (!symbol) {
+                return { success: false, error: 'Either character position or symbol name must be provided' };
+            }
+            const lineText = await getLineText(uri, line - 1);
+            if (lineText === undefined) {
+                return { success: false, error: `Line ${line} not found in file: ${filePath}` };
+            }
+            charPosition = findSymbolInLine(lineText, symbol);
+            if (charPosition === -1) {
+                return { success: false, error: `Symbol "${symbol}" not found on line ${line}` };
+            }
+        }
+        
+        const position = new vscode.Position(line - 1, charPosition);
+        
+        const hoverResults = await vscode.commands.executeCommand<vscode.Hover[]>(
+            'vscode.executeHoverProvider',
+            uri,
+            position
+        ) || [];
+        
+        logger.info(`[getSymbolHoverInfo] Found ${hoverResults.length} hover results`);
+        
+        const hovers: HoverContent[] = await Promise.all(hoverResults.map(async hover => {
+            let contents: string[] = [];
+            
+            if (Array.isArray(hover.contents)) {
+                contents = hover.contents.map(processHoverContent);
+            } else if (hover.contents) {
+                contents = [processHoverContent(hover.contents)];
+            }
+            
+            const range = hover.range ? {
+                start: {
+                    line: hover.range.start.line + 1,
+                    character: hover.range.start.character
+                },
+                end: {
+                    line: hover.range.end.line + 1,
+                    character: hover.range.end.character
+                }
+            } : undefined;
+            
+            const preview = await getPreview(uri, hover.range?.start.line);
+            
+            return { contents, range, preview };
+        }));
+        
+        return { success: true, data: { hovers } };
+    } catch (error) {
+        logger.error(`[getSymbolHoverInfo] Error: ${error instanceof Error ? error.message : String(error)}`);
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+}
+
+// ============================================
 // Helper Functions
 // ============================================
 
 function isLocationLink(def: vscode.Location | vscode.LocationLink): def is vscode.LocationLink {
     return 'targetUri' in def && 'targetRange' in def;
+}
+
+function processHoverContent(content: vscode.MarkedString | vscode.MarkdownString): string {
+    if (typeof content === 'string') {
+        return content;
+    } else if ('value' in content) {
+        return content.value;
+    }
+    return String(content);
 }

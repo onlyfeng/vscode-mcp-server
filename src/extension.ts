@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
-import { MCPServer, ToolConfiguration } from './server';
-import { listWorkspaceFiles } from './tools/file-tools';
+import { MCPServer } from './server';
+import { listWorkspaceFilesLegacy as listWorkspaceFiles } from './core';
 import { logger } from './utils/logger';
+import { getServerSettings, getToolConfiguration, CONFIG_SECTION } from './config';
 
 // Re-export for testing purposes
 export { MCPServer };
@@ -14,24 +15,6 @@ let serverEnabled: boolean = false;
 
 // Terminal name constant
 const TERMINAL_NAME = 'MCP Shell Commands';
-
-/**
- * Gets the tool configuration from VS Code settings
- * @returns ToolConfiguration object with all tool enablement settings
- */
-function getToolConfiguration(): ToolConfiguration {
-    const config = vscode.workspace.getConfiguration('vscode-mcp-server');
-    const enabledTools = config.get<any>('enabledTools') || {};
-    
-    return {
-        file: enabledTools.file ?? true,
-        edit: enabledTools.edit ?? true,
-        shell: enabledTools.shell ?? true,
-        diagnostics: enabledTools.diagnostics ?? true,
-        symbol: enabledTools.symbol ?? true,
-        refactor: enabledTools.refactor ?? true
-    };
-}
 
 /**
  * Gets or creates the shared terminal for the extension
@@ -84,9 +67,7 @@ async function toggleServerState(context: vscode.ExtensionContext): Promise<void
     // Store state for persistence
     context.globalState.update('mcpServerEnabled', serverEnabled);
     
-    const config = vscode.workspace.getConfiguration('vscode-mcp-server');
-    const port = config.get<number>('port') || 3000;
-    const host = config.get<string>('host') || '127.0.0.1';
+    const { port, host } = getServerSettings();
     
     // Update status bar immediately to provide feedback
     updateStatusBar(port);
@@ -152,11 +133,9 @@ export async function activate(context: vscode.ExtensionContext) {
     logger.info('Activating vscode-mcp-server extension');
 
     try {
-        // Get configuration
-        const config = vscode.workspace.getConfiguration('vscode-mcp-server');
-        const defaultEnabled = config.get<boolean>('defaultEnabled') ?? false;
-        const port = config.get<number>('port') || 3000;
-        const host = config.get<string>('host') || '127.0.0.1';
+        // Get configuration from centralized config module
+        const serverSettings = getServerSettings();
+        const { port, host, defaultEnabled } = serverSettings;
 
         // Load saved state or use configured default
         serverEnabled = context.globalState.get('mcpServerEnabled', defaultEnabled);
@@ -221,7 +200,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
         // Listen for configuration changes to restart server if needed
         const configChangeListener = vscode.workspace.onDidChangeConfiguration(async (event) => {
-            if (event.affectsConfiguration('vscode-mcp-server.enabledTools')) {
+            if (event.affectsConfiguration(`${CONFIG_SECTION}.enabledTools`)) {
                 logger.info('[configChangeListener] Tool configuration changed - restarting server if enabled');
                 if (serverEnabled && mcpServer) {
                     // Stop current server
@@ -229,9 +208,7 @@ export async function activate(context: vscode.ExtensionContext) {
                     mcpServer = undefined;
                     
                     // Start new server with updated configuration
-                    const config = vscode.workspace.getConfiguration('vscode-mcp-server');
-                    const port = config.get<number>('port') || 3000;
-                    const host = config.get<string>('host') || '127.0.0.1';
+                    const { port, host } = getServerSettings();
                     const terminal = getExtensionTerminal(context);
                     const toolConfig = getToolConfiguration();
                     

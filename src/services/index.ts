@@ -1,18 +1,11 @@
 /**
- * Services Index - Export all shared services
+ * Services Index - Backward compatibility layer
  * 
- * These services provide the core business logic that is shared between
- * MCP tools and REST API endpoints, ensuring consistent behavior.
+ * This file re-exports from the new core module to maintain backward compatibility
+ * for existing code that imports from './services'.
+ * 
+ * @deprecated Import directly from '../core' for new code.
  */
 
-// Common utilities
-export * from './common';
-
-// Symbol operations
-export * from './symbol-service';
-
-// Refactor operations
-export * from './refactor-service';
-
-// Diagnostics operations
-export * from './diagnostics-service';
+// Re-export all core functionality
+export * from '../core';

@@ -1,10 +1,10 @@
 /**
- * Refactor Service - Core refactoring logic shared by MCP tools and REST API
+ * Refactor Service - Core refactoring logic
  * Handles code actions, rename, and workspace edits
  */
 
 import * as vscode from 'vscode';
-import { logger } from '../utils/logger';
+import { logger } from '../../utils/logger';
 import {
     resolveToUri,
     uriToWorkspacePath,
@@ -17,7 +17,7 @@ import {
     saveDocument,
     saveAffectedDocuments,
     ServiceResult
-} from './common';
+} from '../common';
 
 // ============================================
 // Types
@@ -57,6 +57,23 @@ export interface RenameResult {
     totalChanges: number;
     error?: string;
 }
+
+// ============================================
+// Safe removal keywords for isDangerousQuickfix
+// ============================================
+
+const SAFE_REMOVAL_KEYWORDS = [
+    'import',
+    'parameter',
+    'argument',
+    'variable',
+    'property',
+    'function',
+    'method',
+    'class',
+    'interface',
+    'type'
+];
 
 // ============================================
 // Code Actions
@@ -176,9 +193,41 @@ export async function listCodeActions(
 }
 
 /**
+ * Check if a code action is potentially dangerous (might remove useful code)
+ * Uses fine-grained filtering based on safe removal keywords
+ * These actions should be skipped in applyAll mode to avoid unintended code removal
+ * @param action The code action to check
+ * @returns true if the action should be filtered out in applyAll mode
+ */
+export function isDangerousQuickfix(action: vscode.CodeAction): boolean {
+    const title = action.title.toLowerCase();
+    const hasSafeRemovalKeyword = SAFE_REMOVAL_KEYWORDS.some(keyword => title.includes(keyword));
+    
+    // We only treat "remove unused" style actions as dangerous when they don't clearly
+    // target a specific, intentionally unused symbol (parameter, variable, etc.).
+    // This prevents filtering legitimate fixes such as "Remove unused parameter 'req'".
+    if ((title.includes('remove unused declaration') ||
+        title.includes('remove unused') ||
+        title.includes('delete unused')) &&
+        !hasSafeRemovalKeyword) {
+        logger.info(`[isDangerousQuickfix] Filtering dangerous action: "${action.title}"`);
+        return true;
+    }
+    
+    // Filter out overly generic removal actions (e.g. "Remove statement") but allow scoped ones
+    if (title.includes('remove') && !title.includes('import') && !hasSafeRemovalKeyword) {
+        logger.info(`[isDangerousQuickfix] Filtering potentially dangerous removal action: "${action.title}"`);
+        return true;
+    }
+    
+    return false;
+}
+
+/**
  * Apply a single code action
  * @param action The code action to apply
  * @param targetUri The target file URI
+ * @param originalRange Optional original range for fix-all fallback
  */
 export async function applySingleCodeAction(
     action: vscode.CodeAction,
@@ -303,7 +352,7 @@ export async function applySingleCodeAction(
             }
         }
         
-        // Fallback for fix-all actions that produced no edits (common for some language servers)
+        // Fallback for fix-all actions that produced no edits
         if (!actionApplied && isFixAllAction && originalRange) {
             actionMessage += `Fix-all provider returned no edits. Falling back to sequential quickfix sweep.\n`;
             const fallbackResult = await applyAllQuickfixes(targetUri, originalRange);
@@ -328,38 +377,6 @@ export async function applySingleCodeAction(
 }
 
 /**
- * Check if a code action is potentially dangerous (might remove useful code)
- * These actions should be skipped in applyAll mode to avoid unintended code removal
- * @param action The code action to check
- * @returns true if the action should be filtered out in applyAll mode
- */
-export function isDangerousQuickfix(action: vscode.CodeAction): boolean {
-    const title = action.title.toLowerCase();
-    
-    // Filter out "Remove unused declaration" type actions
-    // These can incorrectly remove function calls with side effects (like logging)
-    // TypeScript may mark string literals in function calls as "unused declarations"
-    if (title.includes('remove unused declaration') || 
-        title.includes('remove unused') ||
-        title.includes('delete unused')) {
-        logger.info(`[isDangerousQuickfix] Filtering dangerous action: "${action.title}"`);
-        return true;
-    }
-    
-    // Filter out actions that delete entire statements without being specific about variables/imports
-    // But allow "Remove import" which is safe
-    if (title.includes('remove') && !title.includes('import')) {
-        // Check if it's a generic removal action (not targeting a specific import)
-        if (!title.includes('parameter') && !title.includes('variable')) {
-            logger.info(`[isDangerousQuickfix] Filtering potentially dangerous removal action: "${action.title}"`);
-            return true;
-        }
-    }
-    
-    return false;
-}
-
-/**
  * Apply all quickfix actions for a file, re-fetching after each application
  * This prevents position invalidation issues when multiple actions are applied
  * @param targetUri The target file URI
@@ -380,8 +397,6 @@ export async function applyAllQuickfixes(
     let iteration = 0;
     
     // Track failed action titles to avoid infinite retry loops
-    // Note: We only track failures because the same title (e.g., "Prefix 'req' with an underscore")
-    // may apply to multiple different positions in the file
     const failedActionTitles = new Set<string>();
     
     while (iteration < maxIterations) {
@@ -390,7 +405,7 @@ export async function applyAllQuickfixes(
         // Re-fetch code actions with fresh position information
         const document = await openDocument(targetUri);
         
-        // Handle empty documents - no code actions possible
+        // Handle empty documents
         if (document.lineCount === 0) {
             logger.info(`[applyAllQuickfixes] Document is empty, no actions possible`);
             break;
@@ -404,18 +419,13 @@ export async function applyAllQuickfixes(
             new vscode.Position(endLine, endChar)
         );
         
-        // Don't specify kind='quickfix' here - doing so may cause TypeScript LS to return
-        // different isPreferred values than when listing without kind filter.
-        // We filter by kind in the next step instead.
         const freshActions = await vscode.commands.executeCommand<vscode.CodeAction[]>(
             'vscode.executeCodeActionProvider',
             targetUri,
             currentRange
-            // No kind parameter - filter afterward to preserve isPreferred accuracy
         ) || [];
         
         // Filter to quickfix actions only, excluding dangerous ones and previously failed ones
-        // When onlyPreferred is true, only include actions marked as isPreferred
         const quickfixActions = freshActions.filter(a =>
             a.kind?.value?.startsWith('quickfix') &&
             !isDangerousQuickfix(a) &&
@@ -437,9 +447,7 @@ export async function applyAllQuickfixes(
         if (applied) {
             appliedCount++;
             logger.info(`[applyAllQuickfixes] Action "${actionToApply.title}" applied successfully`);
-            // Don't track successful actions - same title may need to be applied at other positions
         } else {
-            // Only track failed actions to prevent infinite retry loops
             failedActionTitles.add(actionToApply.title);
             logger.warn(`[applyAllQuickfixes] Action "${actionToApply.title}" failed to apply, will skip this title in future iterations`);
         }
@@ -488,13 +496,11 @@ export async function renameSymbol(
         
         const document = await openDocument(uri);
         
-        // Validate line number
         const lineError = validateLineNumber(line, document.lineCount);
         if (lineError) {
             return { success: false, applied: false, newName, affectedFiles: [], totalChanges: 0, error: lineError };
         }
         
-        // Determine character position
         let charPosition = character;
         if (charPosition === undefined) {
             if (!symbol) {
@@ -512,7 +518,7 @@ export async function renameSymbol(
         
         const position = new vscode.Position(line - 1, charPosition);
         
-        // Optional: Prepare rename to validate
+        // Prepare rename to validate
         try {
             const prepareResult = await vscode.commands.executeCommand<vscode.Range | { range: vscode.Range; placeholder: string }>(
                 'vscode.prepareRename',
@@ -557,13 +563,11 @@ export async function renameSymbol(
                 return { success: false, applied: false, newName, affectedFiles, totalChanges, error: 'Failed to apply rename' };
             }
             
-            // Save affected documents
             await saveAffectedDocuments(workspaceEdit);
             
             logger.info(`[renameSymbol] Rename applied successfully`);
             return { success: true, applied: true, newName, affectedFiles, totalChanges };
         } else {
-            // Preview only
             return { success: true, applied: false, newName, affectedFiles, totalChanges };
         }
     } catch (error) {

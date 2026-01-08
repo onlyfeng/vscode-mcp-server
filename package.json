@@ -3,9 +3,9 @@
   "icon": "media/logo.png",
   "displayName": "vscode-mcp-server",
   "description": "VS Code as a MCP server",
-  "version": "0.3.3",
-  "repository": "https://github.com/juehang/vscode-mcp-server",
-  "publisher": "JuehangQin",
+  "version": "0.4.0",
+  "repository": "https://github.com/onlyfeng/vscode-mcp-server",
+  "publisher": "onlyfeng",
   "license": "MIT",
   "engines": {
     "vscode": "^1.99.0"
@@ -67,7 +67,7 @@
             },
             "symbol": {
               "type": "boolean",
-              "description": "Enable code symbol and structure analysis tools"
+              "description": "Enable code symbol and structure analysis tools (including definition and hover)"
             },
             "refactor": {
               "type": "boolean",

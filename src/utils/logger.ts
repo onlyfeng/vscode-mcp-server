@@ -6,7 +6,8 @@ import * as vscode from 'vscode';
  */
 export class Logger {
     private static instance: Logger;
-    private outputChannel: vscode.OutputChannel;
+    private outputChannel: vscode.OutputChannel | null = null;
+    private disposed: boolean = false;
 
     private constructor() {
         this.outputChannel = vscode.window.createOutputChannel('MCP Server Extension');
@@ -23,6 +24,16 @@ export class Logger {
     }
 
     /**
+     * Reset the logger instance (useful for testing)
+     */
+    public static resetInstance(): void {
+        if (Logger.instance) {
+            Logger.instance.dispose();
+        }
+        Logger.instance = undefined as unknown as Logger;
+    }
+
+    /**
      * Format a message with timestamp
      * @param message The message to format
      * @returns Formatted message with timestamp
@@ -33,11 +44,27 @@ export class Logger {
     }
 
     /**
+     * Safely write to the output channel
+     * @param message The formatted message to write
+     */
+    private safeAppendLine(message: string): void {
+        if (this.disposed || !this.outputChannel) {
+            return;
+        }
+        try {
+            this.outputChannel.appendLine(message);
+        } catch {
+            // Channel may have been closed, silently ignore
+            this.disposed = true;
+        }
+    }
+
+    /**
      * Log an informational message
      * @param message The message to log
      */
     public info(message: string): void {
-        this.outputChannel.appendLine(this.formatMessage(`INFO: ${message}`));
+        this.safeAppendLine(this.formatMessage(`INFO: ${message}`));
     }
 
     /**
@@ -45,7 +72,7 @@ export class Logger {
      * @param message The message to log
      */
     public warn(message: string): void {
-        this.outputChannel.appendLine(this.formatMessage(`WARN: ${message}`));
+        this.safeAppendLine(this.formatMessage(`WARN: ${message}`));
     }
 
     /**
@@ -53,7 +80,7 @@ export class Logger {
      * @param message The message to log
      */
     public error(message: string): void {
-        this.outputChannel.appendLine(this.formatMessage(`ERROR: ${message}`));
+        this.safeAppendLine(this.formatMessage(`ERROR: ${message}`));
     }
 
     /**
@@ -61,23 +88,36 @@ export class Logger {
      * @param message The message to log
      */
     public debug(message: string): void {
-        this.outputChannel.appendLine(this.formatMessage(`DEBUG: ${message}`));
+        this.safeAppendLine(this.formatMessage(`DEBUG: ${message}`));
     }
 
     /**
      * Show the output channel in the VS Code UI
      */
     public showChannel(): void {
-        this.outputChannel.show();
+        if (this.disposed || !this.outputChannel) {
+            return;
+        }
+        try {
+            this.outputChannel.show();
+        } catch {
+            this.disposed = true;
+        }
     }
 
     /**
      * Dispose of the output channel
      */
     public dispose(): void {
-        if (this.outputChannel) {
-            this.outputChannel.dispose();
+        if (this.outputChannel && !this.disposed) {
+            try {
+                this.outputChannel.dispose();
+            } catch {
+                // Ignore disposal errors
+            }
         }
+        this.outputChannel = null;
+        this.disposed = true;
     }
 }
 
