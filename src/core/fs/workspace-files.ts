@@ -43,6 +43,14 @@ export async function listWorkspaceFiles(
             return { success: false, error: 'No workspace folder is open' };
         }
 
+        // Normalize workspacePath for consistent, cross-platform results:
+        // - Treat '.' as workspace root
+        // - Always return paths using forward slashes (POSIX style)
+        const normalizedBase =
+            workspacePath === '.' || workspacePath === './'
+                ? ''
+                : path.posix.normalize(workspacePath).replace(/^\.\/+/, '').replace(/\/+$/, '');
+
         const workspaceFolder = vscode.workspace.workspaceFolders[0];
         const workspaceUri = workspaceFolder.uri;
         
@@ -55,10 +63,11 @@ export async function listWorkspaceFiles(
             const result: FileListingResult = [];
 
             for (const [name, type] of entries) {
-                const entryPath = currentPath ? path.join(currentPath, name) : name;
+                const entryPath = currentPath ? path.posix.join(currentPath, name) : name;
                 const itemType: 'file' | 'directory' = (type & vscode.FileType.Directory) ? 'directory' : 'file';
                 
-                result.push({ path: entryPath, type: itemType });
+                const fullPath = normalizedBase ? path.posix.join(normalizedBase, entryPath) : entryPath;
+                result.push({ path: fullPath, type: itemType });
 
                 if (recursive && itemType === 'directory') {
                     const subDirUri = vscode.Uri.joinPath(dirUri, name);

@@ -1,4 +1,4 @@
-import express from "express";
+import express from 'express';
 import * as vscode from 'vscode';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -16,6 +16,7 @@ export class MCPServer {
     private transport: StreamableHTTPServerTransport;
     private app: express.Application;
     private httpServer?: Server;
+    private httpServerHandlersAttached: boolean = false;
     private port: number;
     private host: string;
     private fileListingCallback?: FileListingCallback;
@@ -150,19 +151,23 @@ export class MCPServer {
 
     private setupEventHandlers(): void {
         // Log HTTP server events
-        if (this.httpServer) {
-            this.httpServer.on('error', (error: Error) => {
-                logger.error(`[Server] HTTP Server Error: ${error.message}`);
-            });
-
-            this.httpServer.on('listening', () => {
-                logger.info(`[Server] HTTP Server ready`);
-            });
-
-            this.httpServer.on('close', () => {
-                logger.info(`[Server] HTTP Server closed`);
-            });
+        if (!this.httpServer || this.httpServerHandlersAttached) {
+            return;
         }
+
+        this.httpServerHandlersAttached = true;
+
+        this.httpServer.on('error', (error: Error) => {
+            logger.error(`[Server] HTTP Server Error: ${error.message}`);
+        });
+
+        this.httpServer.on('listening', () => {
+            logger.info(`[Server] HTTP Server ready`);
+        });
+
+        this.httpServer.on('close', () => {
+            logger.info(`[Server] HTTP Server closed`);
+        });
     }
 
     public async start(): Promise<void> {
@@ -193,6 +198,9 @@ export class MCPServer {
                     
                     resolve();
                 });
+
+                // Attach server event handlers after httpServer is created
+                this.setupEventHandlers();
             });
         } catch (error) {
             logger.error(`[MCPServer.start] Failed to start MCP Server: ${error instanceof Error ? error.message : String(error)}`);

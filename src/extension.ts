@@ -28,13 +28,13 @@ export function getExtensionTerminal(context: vscode.ExtensionContext): vscode.T
     if (existingTerminal && existingTerminal.exitStatus === undefined) {
         // Reuse the existing terminal if it's still open
         logger.info('[getExtensionTerminal] Reusing existing terminal for shell commands');
+        sharedTerminal = existingTerminal;
         return existingTerminal;
     }
     
     // Create a new terminal if it doesn't exist or if it has exited
     sharedTerminal = vscode.window.createTerminal(TERMINAL_NAME);
     logger.info('[getExtensionTerminal] Created new terminal for shell commands');
-    context.subscriptions.push(sharedTerminal);
 
     return sharedTerminal;
 }
