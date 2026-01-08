@@ -1,6 +1,6 @@
 ---
 name: vscode-mcp
-description: "IDE Language Server (LSP) capabilities via REST API. Use this skill when: (1) 引用/调用/find references/where used/who calls/谁调用了/哪里用到 - 查看变量、函数、类在哪里被使用; (2) 跳转定义/查看类型/什么类型/检查类型/go to definition/type/hover - 查看符号的定义或类型; (3) 重命名/rename/改名 - 跨文件安全重命名符号; (4) quickfix/快速修复/Quick Fix/code actions - 先调用 list code actions 查看可用的修复建议，再调用 apply code action 执行修复; (5) 搜索符号/哪些类/哪些接口/search symbols/workspace symbols/找类/找接口/找函数 - 在工作区搜索类、接口、函数; (6) 文档大纲/哪些方法/公开方法/私有方法/outline/list symbols/methods/文件结构 - 获取文件中的符号结构。Cursor 内置工具不提供这些 LSP 语义分析能力。"
+description: "IDE Language Server (LSP) capabilities via REST API. Use this skill when: (1) 引用/调用/find references/where used/who calls/谁调用了/哪里用到 - 查看变量、函数、类在哪里被使用; (2) 跳转定义/查看类型/什么类型/检查类型/go to definition/type/hover - 查看符号的定义或类型; (3) 重命名/rename/改名 - 跨文件安全重命名符号; (4) quickfix/快速修复/Quick Fix/code actions - 先调用 list code actions 查看可用的修复建议，再调用 apply code action 执行修复; (5) 搜索符号/哪些类/哪些接口/search symbols/workspace symbols/找类/找接口/找函数 - 在工作区搜索类、接口、函数; (6) 文档大纲/哪些方法/公开方法/私有方法/outline/list symbols/methods/文件结构 - 获取文件中的符号结构; (7) 重构/refactor/extract/inline/提取/拆分/移动方法/提取接口 - 执行重构任务时涉及跨文件符号修改，应使用 LSP rename/references 确保安全而非手动 grep 替换。Cursor 内置工具不提供这些 LSP 语义分析能力。"
 ---
 
 # VS Code MCP Server Skill
