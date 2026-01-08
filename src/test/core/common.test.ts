@@ -172,6 +172,11 @@ suite('Core Common Utilities Tests', () => {
             assert.ok(result > 0, 'Should find in middle');
             assert.strictEqual(result, 6, 'Should be at position 6');
         });
+
+        test('should not match identifier substring inside a larger identifier', () => {
+            const result = findSymbolInLine('const myVariable = 1;', 'myVar');
+            assert.strictEqual(result, -1, 'Should not match myVar inside myVariable');
+        });
         
         test('should return -1 when symbol not found', () => {
             const result = findSymbolInLine('const x = 1;', 'notFound');

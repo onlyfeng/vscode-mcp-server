@@ -143,7 +143,42 @@ export async function getLineText(uri: vscode.Uri, line: number): Promise<string
  * @returns The character position (index) where the symbol starts, or -1 if not found
  */
 export function findSymbolInLine(lineText: string, symbolName: string): number {
-    return lineText.indexOf(symbolName);
+    if (!lineText || !symbolName) {
+        return -1;
+    }
+
+    // If it doesn't look like an identifier, fall back to simple substring search.
+    // This keeps behavior predictable for operators or non-standard symbols.
+    const isIdentifier = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(symbolName);
+    if (!isIdentifier) {
+        return lineText.indexOf(symbolName);
+    }
+
+    const isIdentChar = (ch: string) => /[A-Za-z0-9_$]/.test(ch);
+
+    let fromIndex = 0;
+    while (fromIndex <= lineText.length) {
+        const idx = lineText.indexOf(symbolName, fromIndex);
+        if (idx === -1) {
+            return -1;
+        }
+
+        const before = idx > 0 ? lineText[idx - 1] : '';
+        const afterIndex = idx + symbolName.length;
+        const after = afterIndex < lineText.length ? lineText[afterIndex] : '';
+
+        const beforeOk = idx === 0 || !isIdentChar(before);
+        const afterOk = afterIndex === lineText.length || !isIdentChar(after);
+
+        if (beforeOk && afterOk) {
+            return idx;
+        }
+
+        // Skip this occurrence and continue searching
+        fromIndex = idx + symbolName.length;
+    }
+
+    return -1;
 }
 
 /**
