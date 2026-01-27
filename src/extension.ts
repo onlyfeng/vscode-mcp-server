@@ -205,6 +205,48 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         );
 
+        // Command to initialize workspace settings
+        const initWorkspaceSettingsCommand = vscode.commands.registerCommand(
+            'vscode-mcp-server.initWorkspaceSettings',
+            async () => {
+                if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
+                    vscode.window.showWarningMessage('Please open a workspace folder first.');
+                    return;
+                }
+
+                const config = vscode.workspace.getConfiguration(CONFIG_SECTION);
+                const workspaceConfig = vscode.workspace.getConfiguration(CONFIG_SECTION, vscode.workspace.workspaceFolders[0].uri);
+                
+                // Get current effective values (from User or defaults)
+                const currentHost = config.get<string>('host') ?? '127.0.0.1';
+                const currentPort = config.get<number>('port') ?? 3000;
+                const currentDefaultEnabled = config.get<boolean>('defaultEnabled') ?? false;
+                const currentEnabledTools = config.get<object>('enabledTools') ?? {
+                    file: true,
+                    edit: true,
+                    shell: true,
+                    diagnostics: true,
+                    symbol: true,
+                    refactor: true
+                };
+
+                try {
+                    // Write all settings to workspace level
+                    await workspaceConfig.update('host', currentHost, vscode.ConfigurationTarget.Workspace);
+                    await workspaceConfig.update('port', currentPort, vscode.ConfigurationTarget.Workspace);
+                    await workspaceConfig.update('defaultEnabled', currentDefaultEnabled, vscode.ConfigurationTarget.Workspace);
+                    await workspaceConfig.update('enabledTools', currentEnabledTools, vscode.ConfigurationTarget.Workspace);
+                    
+                    vscode.window.showInformationMessage('MCP Server settings initialized in .vscode/settings.json');
+                    logger.info('[initWorkspaceSettings] Workspace settings initialized successfully');
+                } catch (error) {
+                    const errorMsg = error instanceof Error ? error.message : String(error);
+                    vscode.window.showErrorMessage(`Failed to initialize workspace settings: ${errorMsg}`);
+                    logger.error(`[initWorkspaceSettings] Error: ${errorMsg}`);
+                }
+            }
+        );
+
         // Listen for configuration changes to restart server if needed
         const configChangeListener = vscode.workspace.onDidChangeConfiguration(async (event) => {
             if (event.affectsConfiguration(`${CONFIG_SECTION}.enabledTools`)) {
@@ -241,6 +283,7 @@ export async function activate(context: vscode.ExtensionContext) {
             statusBarItem,
             toggleServerCommand,
             showServerInfoCommand,
+            initWorkspaceSettingsCommand,
             configChangeListener,
             { dispose: async () => mcpServer && await mcpServer.stop() }
         );

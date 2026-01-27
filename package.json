@@ -26,16 +26,19 @@
           "default": 3000,
           "minimum": 1024,
           "maximum": 65535,
+          "scope": "resource",
           "description": "The port number for the MCP server"
         },
         "vscode-mcp-server.host": {
           "type": "string",
           "default": "127.0.0.1",
+          "scope": "resource",
           "description": "Host address for the MCP server"
         },
         "vscode-mcp-server.defaultEnabled": {
           "type": "boolean",
           "default": false,
+          "scope": "resource",
           "description": "Whether the MCP server should be enabled by default on VS Code startup"
         },
         "vscode-mcp-server.enabledTools": {
@@ -48,6 +51,7 @@
             "symbol": true,
             "refactor": true
           },
+          "scope": "resource",
           "properties": {
             "file": {
               "type": "boolean",
@@ -90,6 +94,11 @@
       {
         "command": "vscode-mcp-server.toggleServer",
         "title": "Toggle MCP Server"
+      },
+      {
+        "command": "vscode-mcp-server.initWorkspaceSettings",
+        "title": "MCP Server: Initialize Workspace Settings",
+        "shortTitle": "Init Workspace Settings"
       }
     ]
   },

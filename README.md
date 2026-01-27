@@ -280,6 +280,12 @@ Currently, only one workspace is supported. The extension also only works locall
 * `vscode-mcp-server.defaultEnabled`: Whether the MCP server should be enabled by default on VS Code startup
 * `vscode-mcp-server.enabledTools`: Configure which tool categories are enabled (file, edit, shell, diagnostics, symbol, refactor)
 
+All settings support workspace-level configuration (`.vscode/settings.json`), allowing per-project customization.
+
+### Commands
+
+* `MCP Server: Initialize Workspace Settings` - Initialize all MCP Server settings in the current workspace's `.vscode/settings.json`. This is useful for setting up per-project configuration.
+
 **Selective Tool Configuration**: Useful for coding agents that already have certain capabilities. For example, with Claude Code you might disable file/edit tools and only enable symbol and refactor tools to add VS Code-specific symbol searching and refactoring capabilities without tool duplication.
 
 Example configuration for a semantic-only language server setup:

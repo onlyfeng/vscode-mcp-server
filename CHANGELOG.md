@@ -18,6 +18,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - New MCP tool `get_symbol_hover_code` - Get hover info (type signature, documentation)
 - New REST endpoint `GET /api/symbols/hover` - Get hover information
 - Definition / hover tools are controlled by the `enabledTools.symbol` setting (6 categories total)
+- New command `MCP Server: Initialize Workspace Settings` - One-click initialization of project-level settings in `.vscode/settings.json`
+- All configuration properties now support workspace-level settings (`scope: "resource"`)
 - Comprehensive test suite:
   - `src/test/core/` - Unit tests for core layer
   - `src/test/adapters/` - Integration tests for MCP and REST adapters
