@@ -50,7 +50,7 @@ def test_connection(port: int = None) -> bool:
             print(f"❌ Health check failed with status {response.status_code}")
             return False
     except requests.exceptions.ConnectionError:
-        print(f"❌ Connection failed - is the MCP server running on port {port}?")
+        print(f"❌ Connection failed - is the MCP server running at {base_url}?")
         return False
     except Exception as e:
         print(f"❌ Error: {e}")

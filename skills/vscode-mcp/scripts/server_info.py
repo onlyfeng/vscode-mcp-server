@@ -41,7 +41,7 @@ def get_server_info(port: int = None) -> dict:
         response.raise_for_status()
         return response.json()
     except requests.exceptions.ConnectionError:
-        print(f"Error: Cannot connect to server on port {port}")
+        print(f"Error: Cannot connect to server at {base_url}")
         print("Make sure the VS Code MCP Server extension is installed and running.")
         sys.exit(1)
     except requests.exceptions.HTTPError as e:

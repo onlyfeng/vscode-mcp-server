@@ -43,7 +43,7 @@ def find_references(path: str, line: int, symbol: str, port: int = None) -> dict
         response.raise_for_status()
         return response.json()
     except requests.exceptions.ConnectionError:
-        print(f"Error: Cannot connect to server on port {port}")
+        print(f"Error: Cannot connect to server at {base_url}")
         sys.exit(1)
     except requests.exceptions.HTTPError as e:
         if response.status_code == 404:

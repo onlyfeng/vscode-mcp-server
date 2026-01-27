@@ -23,10 +23,9 @@ Usage:
 """
 
 import os
-import re
 import json
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 
 # 默认配置
 DEFAULT_HOST = "127.0.0.1"
@@ -37,18 +36,115 @@ CONFIG_KEY_HOST = "vscode-mcp-server.host"
 CONFIG_KEY_PORT = "vscode-mcp-server.port"
 
 
+def _strip_jsonc_comments(json_str: str) -> str:
+    """
+    移除 JSONC 注释（// 与 /* */），保持字符串内容不被误删
+    """
+    result = []
+    in_string = False
+    escape = False
+    i = 0
+    length = len(json_str)
+
+    while i < length:
+        ch = json_str[i]
+
+        if in_string:
+            result.append(ch)
+            if escape:
+                escape = False
+            elif ch == '\\':
+                escape = True
+            elif ch == '"':
+                in_string = False
+            i += 1
+            continue
+
+        if ch == '"':
+            in_string = True
+            result.append(ch)
+            i += 1
+            continue
+
+        if ch == '/' and i + 1 < length:
+            next_ch = json_str[i + 1]
+            if next_ch == '/':
+                i += 2
+                while i < length and json_str[i] not in '\r\n':
+                    i += 1
+                continue
+            if next_ch == '*':
+                i += 2
+                saw_newline = False
+                while i < length:
+                    if i + 1 < length and json_str[i] == '*' and json_str[i + 1] == '/':
+                        i += 2
+                        break
+                    if json_str[i] in '\r\n':
+                        result.append(json_str[i])
+                        saw_newline = True
+                    i += 1
+                if not saw_newline:
+                    result.append(' ')
+                continue
+
+        result.append(ch)
+        i += 1
+
+    return ''.join(result)
+
+
+def _remove_trailing_commas(json_str: str) -> str:
+    """
+    移除对象或数组末尾的尾随逗号（忽略字符串内容）
+    """
+    result = []
+    in_string = False
+    escape = False
+    i = 0
+    length = len(json_str)
+
+    while i < length:
+        ch = json_str[i]
+
+        if in_string:
+            result.append(ch)
+            if escape:
+                escape = False
+            elif ch == '\\':
+                escape = True
+            elif ch == '"':
+                in_string = False
+            i += 1
+            continue
+
+        if ch == '"':
+            in_string = True
+            result.append(ch)
+            i += 1
+            continue
+
+        if ch == ',':
+            j = i + 1
+            while j < length and json_str[j].isspace():
+                j += 1
+            if j < length and json_str[j] in ('}', ']'):
+                i += 1
+                continue
+
+        result.append(ch)
+        i += 1
+
+    return ''.join(result)
+
+
 def _remove_json_comments(json_str: str) -> str:
     """
     移除 JSON 中的注释（支持 // 和 /* */ 风格）和尾随逗号
     VS Code 的 settings.json 使用 JSONC 格式
     """
-    # 移除单行注释 // ...
-    json_str = re.sub(r'//.*?(?=\n|$)', '', json_str)
-    # 移除多行注释 /* ... */
-    json_str = re.sub(r'/\*.*?\*/', '', json_str, flags=re.DOTALL)
-    # 移除尾随逗号（对象和数组末尾的逗号）
-    json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
-    return json_str
+    without_comments = _strip_jsonc_comments(json_str)
+    return _remove_trailing_commas(without_comments)
 
 
 def _load_json_with_comments(file_path: Path) -> Optional[Dict[str, Any]]:
@@ -66,24 +162,36 @@ def _load_json_with_comments(file_path: Path) -> Optional[Dict[str, Any]]:
         return None
 
 
-def _get_workspace_settings() -> Optional[Dict[str, Any]]:
-    """
-    读取工作区 .vscode/settings.json
-    从当前工作目录向上查找
-    """
-    cwd = Path.cwd()
-    
-    # 向上查找 .vscode/settings.json
-    for parent in [cwd] + list(cwd.parents):
-        settings_path = parent / '.vscode' / 'settings.json'
-        settings = _load_json_with_comments(settings_path)
-        if settings is not None:
-            return settings
-    
+def _find_settings_in_parents(start_dir: Path) -> Optional[Tuple[Dict[str, Any], Path]]:
+    for parent in [start_dir] + list(start_dir.parents):
+        for rel_path in (Path('.vscode/settings.json'), Path('.claude/settings.json')):
+            settings_path = parent / rel_path
+            settings = _load_json_with_comments(settings_path)
+            if settings is not None:
+                return settings, settings_path
     return None
 
 
-def _get_cursor_user_settings() -> Optional[Dict[str, Any]]:
+def _get_workspace_settings() -> Tuple[Optional[Dict[str, Any]], Optional[Path]]:
+    """
+    读取工作区 settings.json
+    优先从当前工作目录向上查找，找不到再从脚本目录向上查找
+    """
+    cwd = Path.cwd()
+    result = _find_settings_in_parents(cwd)
+    if result:
+        return result
+
+    script_dir = Path(__file__).resolve().parent
+    if script_dir != cwd:
+        result = _find_settings_in_parents(script_dir)
+        if result:
+            return result
+
+    return None, None
+
+
+def _get_cursor_user_settings() -> Tuple[Optional[Dict[str, Any]], Optional[Path]]:
     """
     读取 Cursor 用户设置
     macOS: ~/Library/Application Support/Cursor/User/settings.json
@@ -99,10 +207,13 @@ def _get_cursor_user_settings() -> Optional[Dict[str, Any]]:
     else:  # Linux
         settings_path = home / '.config' / 'Cursor' / 'User' / 'settings.json'
     
-    return _load_json_with_comments(settings_path)
+    settings = _load_json_with_comments(settings_path)
+    if settings is None:
+        return None, None
+    return settings, settings_path
 
 
-def _get_vscode_user_settings() -> Optional[Dict[str, Any]]:
+def _get_vscode_user_settings() -> Tuple[Optional[Dict[str, Any]], Optional[Path]]:
     """
     读取 VS Code 用户设置
     macOS: ~/Library/Application Support/Code/User/settings.json
@@ -118,7 +229,10 @@ def _get_vscode_user_settings() -> Optional[Dict[str, Any]]:
     else:  # Linux
         settings_path = home / '.config' / 'Code' / 'User' / 'settings.json'
     
-    return _load_json_with_comments(settings_path)
+    settings = _load_json_with_comments(settings_path)
+    if settings is None:
+        return None, None
+    return settings, settings_path
 
 
 def get_config() -> Dict[str, Any]:
@@ -132,47 +246,54 @@ def get_config() -> Dict[str, Any]:
     4. 固定默认值 (127.0.0.1:3000)
     
     Returns:
-        dict: 包含 host, port, source（配置来源）的字典
+        dict: 包含 host, port, source, source_path（配置来源路径）的字典
     """
     host = None
     port = None
     source = "default"
+    source_path: Optional[str] = None
     
     # 1. 尝试读取工作区设置
-    workspace_settings = _get_workspace_settings()
+    workspace_settings, workspace_path = _get_workspace_settings()
     if workspace_settings:
         if CONFIG_KEY_HOST in workspace_settings:
             host = workspace_settings[CONFIG_KEY_HOST]
             source = "workspace"
+            source_path = str(workspace_path)
         if CONFIG_KEY_PORT in workspace_settings:
             port = workspace_settings[CONFIG_KEY_PORT]
             source = "workspace"
+            source_path = str(workspace_path)
     
     # 2. 如果工作区没有，尝试 Cursor 用户设置
     if host is None or port is None:
-        cursor_settings = _get_cursor_user_settings()
+        cursor_settings, cursor_path = _get_cursor_user_settings()
         if cursor_settings:
             if host is None and CONFIG_KEY_HOST in cursor_settings:
                 host = cursor_settings[CONFIG_KEY_HOST]
                 if source == "default":
                     source = "cursor-user"
+                    source_path = str(cursor_path)
             if port is None and CONFIG_KEY_PORT in cursor_settings:
                 port = cursor_settings[CONFIG_KEY_PORT]
                 if source == "default":
                     source = "cursor-user"
+                    source_path = str(cursor_path)
     
     # 3. 如果还是没有，尝试 VS Code 用户设置
     if host is None or port is None:
-        vscode_settings = _get_vscode_user_settings()
+        vscode_settings, vscode_path = _get_vscode_user_settings()
         if vscode_settings:
             if host is None and CONFIG_KEY_HOST in vscode_settings:
                 host = vscode_settings[CONFIG_KEY_HOST]
                 if source == "default":
                     source = "vscode-user"
+                    source_path = str(vscode_path)
             if port is None and CONFIG_KEY_PORT in vscode_settings:
                 port = vscode_settings[CONFIG_KEY_PORT]
                 if source == "default":
                     source = "vscode-user"
+                    source_path = str(vscode_path)
     
     # 4. 使用默认值
     if host is None:
@@ -183,7 +304,8 @@ def get_config() -> Dict[str, Any]:
     return {
         "host": host,
         "port": int(port),
-        "source": source
+        "source": source,
+        "source_path": source_path
     }
 
 
@@ -214,7 +336,11 @@ def print_config() -> None:
     print(f"📋 MCP Server Configuration")
     print(f"   Host: {config['host']}")
     print(f"   Port: {config['port']}")
-    print(f"   Source: {config['source']}")
+    source_path = config.get('source_path')
+    if source_path:
+        print(f"   Source: {source_path} ({config['source']})")
+    else:
+        print(f"   Source: {config['source']}")
     print(f"   Base URL: {get_base_url()}")
 
 
