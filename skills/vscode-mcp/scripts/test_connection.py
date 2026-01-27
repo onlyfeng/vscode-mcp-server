@@ -27,10 +27,12 @@ except ImportError:
     print("Error: requests library not installed. Run: pip install requests")
     sys.exit(1)
 
+from config import get_base_url, get_config
 
-def test_connection(port: int = 3000) -> bool:
+
+def test_connection(port: int = None) -> bool:
     """Test connection to the VS Code MCP Server."""
-    base_url = f"http://127.0.0.1:{port}/api"
+    base_url = get_base_url(port=port)
     
     print(f"Testing connection to {base_url}...")
     print("-" * 50)
@@ -78,6 +80,6 @@ def test_connection(port: int = 3000) -> bool:
 
 
 if __name__ == "__main__":
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 3000
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else None
     success = test_connection(port)
     sys.exit(0 if success else 1)

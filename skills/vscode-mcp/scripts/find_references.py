@@ -29,10 +29,12 @@ except ImportError:
     print("Error: requests library not installed. Run: pip install requests")
     sys.exit(1)
 
+from config import get_base_url
 
-def find_references(path: str, line: int, symbol: str, port: int = 3000) -> dict:
+
+def find_references(path: str, line: int, symbol: str, port: int = None) -> dict:
     """Find all references to a symbol."""
-    base_url = f"http://127.0.0.1:{port}/api"
+    base_url = get_base_url(port=port)
     
     url = f"{base_url}/symbols/references?path={path}&line={line}&symbol={symbol}"
     
@@ -84,7 +86,7 @@ if __name__ == "__main__":
     parser.add_argument("path", help="File path containing the symbol")
     parser.add_argument("line", type=int, help="Line number (1-based)")
     parser.add_argument("symbol", help="Symbol name")
-    parser.add_argument("--port", type=int, default=3000, help="Server port")
+    parser.add_argument("--port", type=int, default=None, help="Server port (default: from config)")
     parser.add_argument("--json", action="store_true", help="Output raw JSON")
     args = parser.parse_args()
     

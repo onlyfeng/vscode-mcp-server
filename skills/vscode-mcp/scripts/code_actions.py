@@ -34,10 +34,12 @@ except ImportError:
     print("Error: requests library not installed. Run: pip install requests")
     sys.exit(1)
 
+from config import get_base_url
 
-def get_code_actions(path: str, start_line: int = 1, end_line: int = -1, port: int = 3000) -> dict:
+
+def get_code_actions(path: str, start_line: int = 1, end_line: int = -1, port: int = None) -> dict:
     """Get available code actions for a file range."""
-    base_url = f"http://127.0.0.1:{port}/api"
+    base_url = get_base_url(port=port)
     
     url = f"{base_url}/refactor/code-actions?path={path}&startLine={start_line}&endLine={end_line}"
     
@@ -56,12 +58,12 @@ def get_code_actions(path: str, start_line: int = 1, end_line: int = -1, port: i
 
 
 def apply_code_action(request_id: str, index: int = None, apply_all: bool = False, 
-                      apply_preferred: bool = False, port: int = 3000) -> dict:
+                      apply_preferred: bool = False, port: int = None) -> dict:
     """Apply a code action.
     
     Priority: index > applyPreferred > applyAll
     """
-    base_url = f"http://127.0.0.1:{port}/api"
+    base_url = get_base_url(port=port)
     
     body = {"requestId": request_id}
     if index is not None:
@@ -148,7 +150,7 @@ if __name__ == "__main__":
     parser.add_argument("path", help="File path")
     parser.add_argument("--startLine", type=int, default=1, help="Start line (1-based, default: 1)")
     parser.add_argument("--endLine", type=int, default=-1, help="End line (1-based, -1 for end of file)")
-    parser.add_argument("--port", type=int, default=3000, help="Server port")
+    parser.add_argument("--port", type=int, default=None, help="Server port (default: from config)")
     parser.add_argument("--apply", nargs=2, metavar=('REQUEST_ID', 'INDEX'), help="Apply action by request ID and index")
     parser.add_argument("--apply-all", metavar='REQUEST_ID', help="Apply all quickfix actions")
     parser.add_argument("--apply-preferred", metavar='REQUEST_ID', help="Apply only preferred (⭐) quickfix actions")

@@ -35,8 +35,29 @@ Use this skill for tasks that require **semantic understanding** of code:
 
 1. Install the **vscode-mcp-server** VS Code extension
 2. Enable the MCP server (click status bar or run command `MCP: Start Server`)
-3. Server runs at `http://127.0.0.1:3000` by default
-4. Install Python dependencies: `pip install -r scripts/requirements.txt`
+3. Install Python dependencies: `pip install -r scripts/requirements.txt`
+
+### Port/Host Configuration
+
+All scripts automatically read port/host from VS Code/Cursor settings. Configuration priority:
+
+1. **Workspace settings**: `.vscode/settings.json`
+2. **Cursor user settings**: `~/Library/Application Support/Cursor/User/settings.json`
+3. **VS Code user settings**: `~/Library/Application Support/Code/User/settings.json`
+4. **Default**: `127.0.0.1:3000`
+
+Configure in settings.json:
+```json
+{
+  "vscode-mcp-server.host": "127.0.0.1",
+  "vscode-mcp-server.port": 3001
+}
+```
+
+Check current configuration:
+```bash
+python scripts/config.py
+```
 
 ## Quick Start
 
@@ -286,7 +307,7 @@ All scripts support common options:
 
 | Option | Description |
 |--------|-------------|
-| `--port PORT` | Server port (default: 3000) |
+| `--port PORT` | Server port (default: from `scripts/config.py`) |
 | `--json` | Output raw JSON (where supported) |
 | `--help` | Show help message |
 

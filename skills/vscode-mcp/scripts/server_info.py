@@ -29,10 +29,12 @@ except ImportError:
     print("Error: requests library not installed. Run: pip install requests")
     sys.exit(1)
 
+from config import get_base_url, get_config
 
-def get_server_info(port: int = 3000) -> dict:
+
+def get_server_info(port: int = None) -> dict:
     """Get server info from VS Code MCP Server."""
-    base_url = f"http://127.0.0.1:{port}/api"
+    base_url = get_base_url(port=port)
     
     try:
         response = requests.get(f"{base_url}/info", timeout=5)
@@ -47,9 +49,9 @@ def get_server_info(port: int = 3000) -> dict:
         sys.exit(1)
 
 
-def get_health(port: int = 3000) -> dict:
+def get_health(port: int = None) -> dict:
     """Get health status from VS Code MCP Server."""
-    base_url = f"http://127.0.0.1:{port}/api"
+    base_url = get_base_url(port=port)
     
     try:
         response = requests.get(f"{base_url}/health", timeout=5)
@@ -115,7 +117,7 @@ def format_info(info: dict, health: dict) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Get VS Code MCP Server info")
-    parser.add_argument("--port", type=int, default=3000, help="Server port")
+    parser.add_argument("--port", type=int, default=None, help="Server port (default: from config)")
     parser.add_argument("--json", action="store_true", help="Output raw JSON")
     args = parser.parse_args()
     

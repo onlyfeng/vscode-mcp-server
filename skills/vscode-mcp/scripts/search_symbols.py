@@ -30,10 +30,12 @@ except ImportError:
     print("Error: requests library not installed. Run: pip install requests")
     sys.exit(1)
 
+from config import get_base_url
 
-def search_symbols(query: str, max_results: int = 10, port: int = 3000) -> dict:
+
+def search_symbols(query: str, max_results: int = 10, port: int = None) -> dict:
     """Search symbols across workspace."""
-    base_url = f"http://127.0.0.1:{port}/api"
+    base_url = get_base_url(port=port)
     
     # URL encode the query for special characters
     encoded_query = quote(query)
@@ -128,7 +130,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Search workspace symbols")
     parser.add_argument("query", help="Search query")
     parser.add_argument("--max", type=int, default=10, dest="max_results", help="Max results (default: 10)")
-    parser.add_argument("--port", type=int, default=3000, help="Server port")
+    parser.add_argument("--port", type=int, default=None, help="Server port (default: from config)")
     parser.add_argument("--json", action="store_true", help="Output raw JSON")
     args = parser.parse_args()
     

@@ -33,10 +33,12 @@ except ImportError:
     print("Error: requests library not installed. Run: pip install requests")
     sys.exit(1)
 
+from config import get_base_url
 
-def get_diagnostics(path: str = None, port: int = 3000) -> dict:
+
+def get_diagnostics(path: str = None, port: int = None) -> dict:
     """Get diagnostics from VS Code MCP Server."""
-    base_url = f"http://127.0.0.1:{port}/api"
+    base_url = get_base_url(port=port)
     
     url = f"{base_url}/diagnostics"
     if path:
@@ -95,7 +97,7 @@ def format_diagnostics(data: dict) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Get VS Code diagnostics")
     parser.add_argument("path", nargs="?", help="File path (optional)")
-    parser.add_argument("--port", type=int, default=3000, help="Server port")
+    parser.add_argument("--port", type=int, default=None, help="Server port (default: from config)")
     parser.add_argument("--json", action="store_true", help="Output raw JSON")
     args = parser.parse_args()
     

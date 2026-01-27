@@ -29,10 +29,12 @@ except ImportError:
     print("Error: requests library not installed. Run: pip install requests")
     sys.exit(1)
 
+from config import get_base_url
 
-def get_document_symbols(path: str, port: int = 3000) -> dict:
+
+def get_document_symbols(path: str, port: int = None) -> dict:
     """Get document symbols for a file."""
-    base_url = f"http://127.0.0.1:{port}/api"
+    base_url = get_base_url(port=port)
     
     url = f"{base_url}/symbols/document?path={path}"
     
@@ -130,7 +132,7 @@ def format_symbols(data: dict, path: str) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Get document symbols")
     parser.add_argument("path", help="File path")
-    parser.add_argument("--port", type=int, default=3000, help="Server port")
+    parser.add_argument("--port", type=int, default=None, help="Server port (default: from config)")
     parser.add_argument("--json", action="store_true", help="Output raw JSON")
     args = parser.parse_args()
     

@@ -29,10 +29,12 @@ except ImportError:
     print("Error: requests library not installed. Run: pip install requests")
     sys.exit(1)
 
+from config import get_base_url
 
-def rename_symbol(path: str, line: int, symbol: str, new_name: str, apply: bool = True, port: int = 3000) -> dict:
+
+def rename_symbol(path: str, line: int, symbol: str, new_name: str, apply: bool = True, port: int = None) -> dict:
     """Rename a symbol."""
-    base_url = f"http://127.0.0.1:{port}/api"
+    base_url = get_base_url(port=port)
     
     body = {
         "path": path,
@@ -95,7 +97,7 @@ if __name__ == "__main__":
     parser.add_argument("line", type=int, help="Line number (1-based)")
     parser.add_argument("symbol", help="Symbol name to rename")
     parser.add_argument("newName", help="New name for the symbol")
-    parser.add_argument("--port", type=int, default=3000, help="Server port")
+    parser.add_argument("--port", type=int, default=None, help="Server port (default: from config)")
     parser.add_argument("--preview", action="store_true", help="Preview changes without applying")
     parser.add_argument("--json", action="store_true", help="Output raw JSON")
     args = parser.parse_args()
